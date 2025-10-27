@@ -85,16 +85,3 @@ jobs:
             --title "$PLUGIN_NAME $TAG" \
             --notes-file release-notes.md \
             dist/*.zip
-
-      - name: Delete source code archives
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ steps.plugin_info.outputs.TAG }}"
-
-          # Wait a moment for release assets to be fully created
-          sleep 5
-
-          # Delete source code archives
-          gh release delete-asset "$TAG" "Source code (zip)" --yes || echo "Source code (zip) not found"
-          gh release delete-asset "$TAG" "Source code (tar.gz)" --yes || echo "Source code (tar.gz) not found"
