@@ -8,6 +8,7 @@
   "entry": "index.js",
   "icon": "icon.png",
   "category": "utility",
+  "repository": "https://github.com/siganberg/ncsender-plugin-autodustboot",
   "priority": 100,
   "events": [
     "onBeforeCommand"
