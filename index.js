@@ -254,36 +254,63 @@ export function onLoad(ctx) {
       };
     }
 
-    // Find original M6 command
+    // Find original M6 or $TLS command
     const m6Index = commands.findIndex(cmd => {
       if (!cmd.isOriginal) return false;
       const parsed = ctx.utils.parseM6Command(cmd.command);
       return parsed?.matched && parsed.toolNumber !== null;
     });
 
-    if (m6Index !== -1) {
-      const parsed = ctx.utils.parseM6Command(commands[m6Index].command);
-      const toolNumber = parsed?.toolNumber;
+    const tlsIndex = commands.findIndex(cmd => {
+      if (!cmd.isOriginal) return false;
+      return /^\$tls/i.test(cmd.command.trim());
+    });
 
-      // Only process if we have a valid tool number
-      if (toolNumber !== null && Number.isFinite(toolNumber)) {
+    const toolChangeIndex = m6Index !== -1 ? m6Index : tlsIndex;
+
+    if (toolChangeIndex !== -1) {
+      const isTLS = toolChangeIndex === tlsIndex;
+      const commandText = commands[toolChangeIndex].command.trim();
+
+      if (isTLS) {
         const location = context.lineNumber !== undefined
           ? `at line ${context.lineNumber}`
           : `from ${context.sourceId}`;
-        ctx.log(`M6 tool change detected with T${toolNumber} ${location}`);
+        ctx.log(`$TLS tool change detected ${location}`);
 
         if (context.sourceId === 'job') {
-          ctx.log('M6 from job source, tracking tool change');
+          ctx.log('$TLS from job source, tracking tool change');
           isToolChanging = true;
-          // Insert retract sequence before M6
           const sequence = createExpandRetractSequence(false);
-          commands.splice(m6Index, 0, sequence);
+          commands.splice(toolChangeIndex, 0, sequence);
           return commands;
         } else {
-          // Client/macro source - full expand/retract sequence
           const sequence = createExpandRetractSequence(true);
-          commands.splice(m6Index, 0, sequence);
+          commands.splice(toolChangeIndex, 0, sequence);
           return commands;
+        }
+      } else {
+        // M6 command
+        const parsed = ctx.utils.parseM6Command(commandText);
+        const toolNumber = parsed?.toolNumber;
+
+        if (toolNumber !== null && Number.isFinite(toolNumber)) {
+          const location = context.lineNumber !== undefined
+            ? `at line ${context.lineNumber}`
+            : `from ${context.sourceId}`;
+          ctx.log(`M6 tool change detected with T${toolNumber} ${location}`);
+
+          if (context.sourceId === 'job') {
+            ctx.log('M6 from job source, tracking tool change');
+            isToolChanging = true;
+            const sequence = createExpandRetractSequence(false);
+            commands.splice(toolChangeIndex, 0, sequence);
+            return commands;
+          } else {
+            const sequence = createExpandRetractSequence(true);
+            commands.splice(toolChangeIndex, 0, sequence);
+            return commands;
+          }
         }
       }
     }
