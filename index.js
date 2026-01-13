@@ -329,7 +329,7 @@ export function onLoad(ctx) {
         const expandPattern = new RegExp(`^(?:N\\d+\\s*)?${normalizedExpandCmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
         if (expandPattern.test(normalizedLine)) {
           ctx.log(`Skipping expand command: ${cmd.command.trim()}`);
-          cmd.command = `; ${cmd.command.trim()} (Moved by AutoDustBoot Plugin)`;
+          cmd.command = `(${cmd.command.trim()}, Moved by AutoDustBoot Plugin)`;
           cmd.displayCommand = null;
           continue;
         }

@@ -85,3 +85,29 @@ jobs:
             --title "$PLUGIN_NAME $TAG" \
             --notes-file release-notes.md \
             dist/*.zip
+
+      - name: Announce on Discord
+        if: success() && env.DISCORD_WEBHOOK_URL != ''
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          PLUGIN_NAME="${{ steps.plugin_info.outputs.PLUGIN_NAME }}"
+          TAG="${{ steps.plugin_info.outputs.TAG }}"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+
+          curl -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"🔌 ${PLUGIN_NAME} ${TAG} Released!\",
+                \"description\": \"A new version of the ${PLUGIN_NAME} plugin is now available.\",
+                \"url\": \"${RELEASE_URL}\",
+                \"color\": 1941124,
+                \"fields\": [
+                  {
+                    \"name\": \"Download\",
+                    \"value\": \"[View Release](${RELEASE_URL})\"
+                  }
+                ]
+              }]
+            }" \
+            "$DISCORD_WEBHOOK_URL"
