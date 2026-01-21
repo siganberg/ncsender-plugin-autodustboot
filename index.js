@@ -3,68 +3,46 @@ let isToolChanging = false;
 export function onLoad(ctx) {
   ctx.log('AutoDustBoot plugin loaded');
 
-  ctx.registerConfigUI(`
-    <!DOCTYPE html>
-    <html>
-    <head>
+  ctx.registerToolMenu('AutoDustBoot', async () => {
+    ctx.log('AutoDustBoot settings opened');
+
+    ctx.showDialog(
+      'AutoDustBoot Settings',
+      /* html */ `
       <style>
-        * {
-          box-sizing: border-box;
-        }
-        body {
-          margin: 0;
+        .adb-dialog {
           padding: 20px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          background: var(--color-surface, #fff);
           color: var(--color-text-primary, #333);
-          height: 100vh;
-          overflow-y: auto;
+          max-width: 600px;
         }
-        .config-form {
-          max-width: 900px;
-        }
-        .form-row {
+        .adb-form-row {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 20px;
           margin-bottom: 20px;
         }
-        .form-group {
+        .adb-form-group {
           display: flex;
           flex-direction: column;
         }
-        .form-group label {
+        .adb-form-group > label {
           margin-bottom: 8px;
           font-weight: 600;
           color: var(--color-text-primary, #333);
         }
-        .form-group input[type="text"],
-        .form-group input[type="number"] {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid var(--color-border, #ddd);
-          border-radius: 4px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 0.9rem;
-          background: var(--color-surface, #fff);
-          color: var(--color-text-primary, #333);
-        }
-        .form-group input:focus {
-          outline: none;
-          border-color: var(--color-accent, #4a90e2);
-        }
-        .toggle-switch {
+        .adb-toggle-switch {
           position: relative;
           width: 50px;
           height: 28px;
           margin-top: 8px;
         }
-        .toggle-switch input {
+        .adb-toggle-switch input {
           opacity: 0;
           width: 0;
           height: 0;
         }
-        .toggle-slider {
+        .adb-toggle-slider {
           position: absolute;
           cursor: pointer;
           top: 0;
@@ -75,7 +53,7 @@ export function onLoad(ctx) {
           transition: .4s;
           border-radius: 28px;
         }
-        .toggle-slider:before {
+        .adb-toggle-slider:before {
           position: absolute;
           content: "";
           height: 20px;
@@ -86,137 +64,263 @@ export function onLoad(ctx) {
           transition: .4s;
           border-radius: 50%;
         }
-        input:checked + .toggle-slider {
+        .adb-toggle-switch input:checked + .adb-toggle-slider {
           background-color: var(--color-accent, #4a90e2);
         }
-        input:checked + .toggle-slider:before {
+        .adb-toggle-switch input:checked + .adb-toggle-slider:before {
           transform: translateX(22px);
         }
-        .help-text {
+        .adb-help-text {
           font-size: 0.85rem;
           color: var(--color-text-secondary, #666);
           margin-top: 6px;
           line-height: 1.4;
         }
+        .adb-monaco-container {
+          height: 80px;
+          border: 1px solid var(--color-border, #ddd);
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        .adb-button-row {
+          display: flex;
+          justify-content: center;
+          gap: 10px;
+          margin-top: 24px;
+          padding-top: 16px;
+          border-top: 1px solid var(--color-border, #ddd);
+        }
+        .adb-btn {
+          padding: 10px 24px;
+          border-radius: 4px;
+          font-size: 0.9rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background-color 0.2s, border-color 0.2s;
+        }
+        .adb-btn-secondary {
+          background: var(--color-surface, #fff);
+          border: 1px solid var(--color-border, #ddd);
+          color: var(--color-text-primary, #333);
+        }
+        .adb-btn-secondary:hover {
+          background: var(--color-surface-muted, #f5f5f5);
+        }
+        .adb-btn-primary {
+          background: var(--color-accent, #4a90e2);
+          border: 1px solid var(--color-accent, #4a90e2);
+          color: white;
+        }
+        .adb-btn-primary:hover {
+          background: var(--color-accent-hover, #3a7bc8);
+        }
       </style>
-    </head>
-    <body>
-      <div class="config-form">
-        <div class="form-row">
-          <div class="form-group">
-            <label for="retractCommand">Retract Command (Optional)</label>
-            <input type="text" id="retractCommand" placeholder="M9">
-            <p class="help-text">Command to retract the AutoDustBoot</p>
+      <div class="adb-dialog">
+        <div class="adb-form-row">
+          <div class="adb-form-group">
+            <label>Retract Sequence</label>
+            <div class="adb-monaco-container" id="adb-retractCommand-editor"></div>
+            <p class="adb-help-text">G-code sequence to retract the dust boot</p>
           </div>
 
-          <div class="form-group">
-            <label for="expandCommand">Expand Command</label>
-            <input type="text" id="expandCommand" placeholder="M8">
-            <p class="help-text">Command to expand the AutoDustBoot</p>
+          <div class="adb-form-group">
+            <label>Expand Sequence</label>
+            <div class="adb-monaco-container" id="adb-expandCommand-editor"></div>
+            <p class="adb-help-text">G-code sequence to expand the dust boot</p>
           </div>
         </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label for="delayAfterExpand">Add Delay After Expand (seconds)</label>
-            <input type="number" id="delayAfterExpand" min="0" max="10" value="1">
-            <p class="help-text">Allow the AutoDustBoot to expand before resuming</p>
+        <div class="adb-form-row">
+          <div class="adb-form-group">
+            <label>Retract on Home</label>
+            <label class="adb-toggle-switch">
+              <input type="checkbox" id="adb-retractOnHome" checked>
+              <span class="adb-toggle-slider"></span>
+            </label>
+            <p class="adb-help-text">Automatically retract when homing ($H)</p>
           </div>
 
-          <div class="form-group">
-            <label for="retractOnHome">Retract on Home</label>
-            <label class="toggle-switch">
-              <input type="checkbox" id="retractOnHome" checked>
-              <span class="toggle-slider"></span>
+          <div class="adb-form-group">
+            <label>Retract on Rapid Move (G0)</label>
+            <label class="adb-toggle-switch">
+              <input type="checkbox" id="adb-retractOnRapidMove" checked>
+              <span class="adb-toggle-slider"></span>
             </label>
-            <p class="help-text">Automatically retract AutoDustBoot when homing</p>
+            <p class="adb-help-text">Retract during rapid moves (except when running jobs)</p>
           </div>
         </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label for="retractOnRapidMove">Retract on Rapid Move (G0)</label>
-            <label class="toggle-switch">
-              <input type="checkbox" id="retractOnRapidMove" checked>
-              <span class="toggle-slider"></span>
+        <div class="adb-form-row">
+          <div class="adb-form-group">
+            <label>Show Added GCode in Terminal</label>
+            <label class="adb-toggle-switch">
+              <input type="checkbox" id="adb-showAddedGCode">
+              <span class="adb-toggle-slider"></span>
             </label>
-            <p class="help-text">Automatically retract the AutoDustBoot during all rapid moves, except when running jobs.</p>
+            <p class="adb-help-text">When disabled, commands are executed silently</p>
           </div>
+        </div>
 
-          <div class="form-group">
-            <label for="showAddedGCode">Show Added GCode in Terminal</label>
-            <label class="toggle-switch">
-              <input type="checkbox" id="showAddedGCode">
-              <span class="toggle-slider"></span>
-            </label>
-            <p class="help-text">When enabled, shows the AutoDustBoot commands in the terminal. When disabled, commands are executed silently.</p>
-          </div>
+        <div class="adb-button-row">
+          <button type="button" class="adb-btn adb-btn-secondary" onclick="window.postMessage({ type: 'close-plugin-dialog' }, '*')">Close</button>
+          <button type="button" class="adb-btn adb-btn-primary" id="adb-saveBtn">Save</button>
         </div>
       </div>
 
       <script>
-        (async function() {
-          try {
-            const response = await fetch('/api/plugins/com.ncsender.autodustboot/settings');
-            if (response.ok) {
-              const settings = await response.json();
-              document.getElementById('retractCommand').value = settings.retractCommand || 'M9';
-              document.getElementById('expandCommand').value = settings.expandCommand || 'M8';
-              document.getElementById('delayAfterExpand').value = settings.delayAfterExpand !== undefined ? settings.delayAfterExpand : 1;
-              document.getElementById('retractOnHome').checked = settings.retractOnHome !== undefined ? settings.retractOnHome : true;
-              document.getElementById('retractOnRapidMove').checked = settings.retractOnRapidMove !== undefined ? settings.retractOnRapidMove : true;
-              document.getElementById('showAddedGCode').checked = settings.showAddedGCode !== undefined ? settings.showAddedGCode : false;
-            }
-          } catch (error) {
-            console.error('Failed to load settings:', error);
+        (function() {
+          const DEFAULT_RETRACT = 'M8\\nG4 P0.1\\nM9';
+          const DEFAULT_EXPAND = 'M8';
+
+          let retractEditor = null;
+          let expandEditor = null;
+
+          // Register G-code language and theme if not already registered
+          function registerGcodeLanguage() {
+            if (typeof monaco === 'undefined') return;
+
+            // Check if already registered
+            const languages = monaco.languages.getLanguages();
+            if (languages.some(lang => lang.id === 'gcode')) return;
+
+            monaco.languages.register({ id: 'gcode' });
+
+            monaco.languages.setMonarchTokensProvider('gcode', {
+              tokenizer: {
+                root: [
+                  [/\\(.*?\\)/, 'comment'],
+                  [/;.*$/, 'comment'],
+                  [/\\b[Gg]0*(?=\\s|$|[A-Za-z])/, 'gcode-rapid'],
+                  [/\\b[Gg][1-3]\\b/, 'gcode-cutting'],
+                  [/\\b[Gg]\\d+\\.?\\d*/, 'gcode-g'],
+                  [/\\b[Mm]\\d+/, 'gcode-m'],
+                  [/\\b[Tt]\\d+/, 'gcode-tool'],
+                  [/\\b[Ss]\\d+\\.?\\d*/, 'gcode-spindle'],
+                  [/\\b[Ff]\\d+\\.?\\d*/, 'gcode-feed'],
+                  [/\\b[Xx]-?\\d+\\.?\\d*/, 'gcode-coord-x'],
+                  [/\\b[Yy]-?\\d+\\.?\\d*/, 'gcode-coord-y'],
+                  [/\\b[Zz]-?\\d+\\.?\\d*/, 'gcode-coord-z'],
+                  [/\\b[AaBbCcIiJjKk]-?\\d+\\.?\\d*/, 'gcode-coord-other'],
+                  [/\\b[Nn]\\d+/, 'gcode-line-number'],
+                  [/-?\\d+\\.?\\d*/, 'number'],
+                ]
+              }
+            });
+
+            monaco.editor.defineTheme('gcode-dark', {
+              base: 'vs-dark',
+              inherit: true,
+              rules: [
+                { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
+                { token: 'gcode-rapid', foreground: 'FF8C00', fontStyle: 'bold' },
+                { token: 'gcode-cutting', foreground: '569CD6', fontStyle: 'bold' },
+                { token: 'gcode-g', foreground: 'C586C0' },
+                { token: 'gcode-m', foreground: 'DCDCAA' },
+                { token: 'gcode-tool', foreground: '4EC9B0' },
+                { token: 'gcode-spindle', foreground: 'CE9178' },
+                { token: 'gcode-feed', foreground: 'B5CEA8' },
+                { token: 'gcode-coord-x', foreground: 'F14C4C' },
+                { token: 'gcode-coord-y', foreground: '4EC9B0' },
+                { token: 'gcode-coord-z', foreground: '569CD6' },
+                { token: 'gcode-coord-other', foreground: '9CDCFE' },
+                { token: 'gcode-line-number', foreground: '858585' },
+                { token: 'number', foreground: 'B5CEA8' },
+              ],
+              colors: {}
+            });
           }
-        })();
 
-        async function saveAutoDustBootConfig() {
-          const retractCommand = document.getElementById('retractCommand').value.trim();
-          const expandCommand = document.getElementById('expandCommand').value.trim();
-          const delayAfterExpand = parseInt(document.getElementById('delayAfterExpand').value, 10);
-          const retractOnHome = document.getElementById('retractOnHome').checked;
-          const retractOnRapidMove = document.getElementById('retractOnRapidMove').checked;
-          const showAddedGCode = document.getElementById('showAddedGCode').checked;
+          registerGcodeLanguage();
 
-          const settings = {
-            retractCommand,
-            expandCommand,
-            delayAfterExpand,
-            retractOnHome,
-            retractOnRapidMove,
-            showAddedGCode
+          const monacoOptions = {
+            language: 'gcode',
+            theme: 'gcode-dark',
+            minimap: { enabled: false },
+            lineNumbers: 'on',
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+            fontSize: 12,
+            tabSize: 2
           };
 
-          try {
-            await fetch('/api/plugins/com.ncsender.autodustboot/settings', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(settings)
-            });
-          } catch (error) {
-            console.error('Failed to save settings:', error);
-          }
-        }
+          async function init() {
+            // Load settings
+            let settings = {};
+            try {
+              const response = await fetch('/api/plugins/com.ncsender.autodustboot/settings');
+              if (response.ok) {
+                settings = await response.json();
+              }
+            } catch (error) {
+              console.error('Failed to load settings:', error);
+            }
 
-        document.getElementById('retractCommand').addEventListener('blur', saveAutoDustBootConfig);
-        document.getElementById('expandCommand').addEventListener('blur', saveAutoDustBootConfig);
-        document.getElementById('delayAfterExpand').addEventListener('blur', saveAutoDustBootConfig);
-        document.getElementById('retractOnHome').addEventListener('change', saveAutoDustBootConfig);
-        document.getElementById('retractOnRapidMove').addEventListener('change', saveAutoDustBootConfig);
-        document.getElementById('showAddedGCode').addEventListener('change', saveAutoDustBootConfig);
+            // Initialize Monaco editors
+            if (typeof monaco !== 'undefined') {
+              const retractContainer = document.getElementById('adb-retractCommand-editor');
+              if (retractContainer) {
+                retractEditor = monaco.editor.create(retractContainer, {
+                  ...monacoOptions,
+                  value: settings.retractCommand || DEFAULT_RETRACT.replace(/\\\\n/g, '\\n')
+                });
+              }
+
+              const expandContainer = document.getElementById('adb-expandCommand-editor');
+              if (expandContainer) {
+                expandEditor = monaco.editor.create(expandContainer, {
+                  ...monacoOptions,
+                  value: settings.expandCommand || DEFAULT_EXPAND
+                });
+              }
+            }
+
+            // Load toggle values
+            document.getElementById('adb-retractOnHome').checked = settings.retractOnHome !== undefined ? settings.retractOnHome : true;
+            document.getElementById('adb-retractOnRapidMove').checked = settings.retractOnRapidMove !== undefined ? settings.retractOnRapidMove : true;
+            document.getElementById('adb-showAddedGCode').checked = settings.showAddedGCode !== undefined ? settings.showAddedGCode : false;
+          }
+
+          async function saveAndClose() {
+            const retractCommand = retractEditor ? retractEditor.getValue().trim() : '';
+            const expandCommand = expandEditor ? expandEditor.getValue().trim() : '';
+            const retractOnHome = document.getElementById('adb-retractOnHome').checked;
+            const retractOnRapidMove = document.getElementById('adb-retractOnRapidMove').checked;
+            const showAddedGCode = document.getElementById('adb-showAddedGCode').checked;
+
+            const settings = {
+              retractCommand,
+              expandCommand,
+              retractOnHome,
+              retractOnRapidMove,
+              showAddedGCode
+            };
+
+            try {
+              await fetch('/api/plugins/com.ncsender.autodustboot/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+              });
+              window.postMessage({ type: 'close-plugin-dialog' }, '*');
+            } catch (error) {
+              console.error('Failed to save settings:', error);
+            }
+          }
+
+          document.getElementById('adb-saveBtn').addEventListener('click', saveAndClose);
+          init();
+        })();
       </script>
-    </body>
-    </html>
-  `);
+      `,
+      { closable: true, width: '650px' }
+    );
+  }, { icon: 'icon.png' });
 
   // NEW API: onBeforeCommand receives command array
   ctx.registerEventHandler('onBeforeCommand', async (commands, context) => {
     const settings = ctx.getSettings();
     const expandCommand = settings.expandCommand || 'M8';
-    const retractCommand = settings.retractCommand || 'M9';
-    const delayAfterExpand = settings.delayAfterExpand !== undefined ? settings.delayAfterExpand : 1;
+    const retractCommand = settings.retractCommand || 'M8\nG4 P0.1\nM9';
     const retractOnHome = settings.retractOnHome !== undefined ? settings.retractOnHome : true;
     const retractOnRapidMove = settings.retractOnRapidMove !== undefined ? settings.retractOnRapidMove : true;
     const showAddedGCode = settings.showAddedGCode !== undefined ? settings.showAddedGCode : false;
@@ -226,20 +330,15 @@ export function onLoad(ctx) {
       return commands; // No configuration, pass through
     }
 
-    // Helper to create expand/retract sequence as a single multi-line command
-    function createExpandRetractSequence(includeExpand = true) {
+    // Helper to create command sequence
+    function createCommandSequence(commandText) {
       const sequence = [];
 
       if (showAddedGCode) {
         sequence.push('(Start of AutoDustBoot Plugin Sequence)');
       }
 
-      if (includeExpand) {
-        sequence.push(expandCommand);
-        sequence.push('G4 P0.1');
-      }
-
-      sequence.push(retractCommand);
+      sequence.push(commandText);
 
       if (showAddedGCode) {
         sequence.push('(End of AutoDustBoot Plugin Sequence)');
@@ -281,11 +380,11 @@ export function onLoad(ctx) {
         if (context.sourceId === 'job') {
           ctx.log('$TLS from job source, tracking tool change');
           isToolChanging = true;
-          const sequence = createExpandRetractSequence(false);
+          const sequence = createCommandSequence(retractCommand);
           commands.splice(toolChangeIndex, 0, sequence);
           return commands;
         } else {
-          const sequence = createExpandRetractSequence(true);
+          const sequence = createCommandSequence(retractCommand);
           commands.splice(toolChangeIndex, 0, sequence);
           return commands;
         }
@@ -303,11 +402,11 @@ export function onLoad(ctx) {
           if (context.sourceId === 'job') {
             ctx.log('M6 from job source, tracking tool change');
             isToolChanging = true;
-            const sequence = createExpandRetractSequence(false);
+            const sequence = createCommandSequence(retractCommand);
             commands.splice(toolChangeIndex, 0, sequence);
             return commands;
           } else {
-            const sequence = createExpandRetractSequence(true);
+            const sequence = createCommandSequence(retractCommand);
             commands.splice(toolChangeIndex, 0, sequence);
             return commands;
           }
@@ -342,15 +441,9 @@ export function onLoad(ctx) {
           ctx.log(`First XY movement after tool change at line ${context.lineNumber}`);
           isToolChanging = false;
 
-          // Insert expand command and delay after this XY movement as a single multi-line command
-          const expandLines = [expandCommand];
-
-          if (delayAfterExpand > 0) {
-            expandLines.push(`G4 P${delayAfterExpand}`);
-          }
-
+          // Insert expand command after this XY movement
           const expandSequence = {
-            command: expandLines.join('\n'),
+            command: expandCommand,
             displayCommand: null,
             meta: showAddedGCode ? {} : { silent: true }
           };
@@ -367,7 +460,7 @@ export function onLoad(ctx) {
 
     if (homeIndex !== -1 && retractOnHome) {
       ctx.log(`Home command detected: ${commands[homeIndex].command.trim()}`);
-      const sequence = createExpandRetractSequence(true);
+      const sequence = createCommandSequence(retractCommand);
       commands.splice(homeIndex, 0, sequence);
       return commands;
     }
@@ -382,7 +475,7 @@ export function onLoad(ctx) {
 
       if (g0Index !== -1) {
         ctx.log(`G0 command from ${context.sourceId} detected: ${commands[g0Index].command.trim()}`);
-        const sequence = createExpandRetractSequence(true);
+        const sequence = createCommandSequence(retractCommand);
         commands.splice(g0Index, 0, sequence);
         return commands;
       }

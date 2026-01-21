@@ -1,7 +1,7 @@
 {
   "id": "com.ncsender.autodustboot",
   "name": "AutoDustboot",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "minAppVersion": "0.3.19",
   "author": "FrancisCreation",
   "description": "Automatically finds the best position to expand the AutoDustBoot.",
@@ -11,7 +11,8 @@
   "repository": "https://github.com/siganberg/ncsender-plugin-autodustboot",
   "priority": 100,
   "events": [
-    "onBeforeCommand"
+    "onBeforeCommand",
+    "onAfterJobEnd"
   ],
   "permissions": ["gcode.modify"]
 }
