@@ -228,13 +228,38 @@ export function onLoad(ctx) {
               ],
               colors: {}
             });
+
+            monaco.editor.defineTheme('gcode-light', {
+              base: 'vs',
+              inherit: true,
+              rules: [
+                { token: 'comment', foreground: '008000', fontStyle: 'italic' },
+                { token: 'gcode-rapid', foreground: 'FF6600', fontStyle: 'bold' },
+                { token: 'gcode-cutting', foreground: '0000FF', fontStyle: 'bold' },
+                { token: 'gcode-g', foreground: 'AF00DB' },
+                { token: 'gcode-m', foreground: '795E26' },
+                { token: 'gcode-tool', foreground: '267F99' },
+                { token: 'gcode-spindle', foreground: 'A31515' },
+                { token: 'gcode-feed', foreground: '098658' },
+                { token: 'gcode-coord-x', foreground: 'CD3131' },
+                { token: 'gcode-coord-y', foreground: '267F99' },
+                { token: 'gcode-coord-z', foreground: '0000FF' },
+                { token: 'gcode-coord-other', foreground: '001080' },
+                { token: 'gcode-line-number', foreground: '858585' },
+                { token: 'number', foreground: '098658' },
+              ],
+              colors: {}
+            });
           }
 
           registerGcodeLanguage();
 
+          const isLightTheme = () => document.body.classList.contains('theme-light');
+          const getMonacoTheme = () => isLightTheme() ? 'gcode-light' : 'gcode-dark';
+
           const monacoOptions = {
             language: 'gcode',
-            theme: 'gcode-dark',
+            theme: getMonacoTheme(),
             minimap: { enabled: false },
             lineNumbers: 'on',
             scrollBeyondLastLine: false,
@@ -272,6 +297,12 @@ export function onLoad(ctx) {
                   value: settings.expandCommand || DEFAULT_EXPAND
                 });
               }
+
+              // Watch for theme changes
+              const themeObserver = new MutationObserver(() => {
+                monaco.editor.setTheme(getMonacoTheme());
+              });
+              themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
             }
 
             // Load toggle values
