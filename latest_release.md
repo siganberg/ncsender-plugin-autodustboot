@@ -1,4 +1,6 @@
+
+
 ## What's Changed
 
-### 🔧 Improvements
-- Added light theme support for the Monaco code editor
+### ✨ New Features
+- Added support for ncSenderPro V2
