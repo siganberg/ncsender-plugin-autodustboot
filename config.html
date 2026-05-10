@@ -206,11 +206,15 @@
         }
       });
 
-      monaco.editor.defineTheme('gcode-dark', {
+      // Shared ncSender theme (matches the host app's theme so the global
+      // monaco.editor.setTheme() call from any other view doesn't strip
+      // colors from the editors here).
+      monaco.editor.defineTheme('ncsender-dark', {
         base: 'vs-dark',
         inherit: true,
         rules: [
           { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
+          { token: 'number', foreground: 'B5CEA8' },
           { token: 'gcode-rapid', foreground: 'FF8C00', fontStyle: 'bold' },
           { token: 'gcode-cutting', foreground: '569CD6', fontStyle: 'bold' },
           { token: 'gcode-g', foreground: 'C586C0' },
@@ -223,38 +227,60 @@
           { token: 'gcode-coord-z', foreground: '569CD6' },
           { token: 'gcode-coord-other', foreground: '9CDCFE' },
           { token: 'gcode-line-number', foreground: '858585' },
-          { token: 'number', foreground: 'B5CEA8' },
+          { token: 'log.timestamp', foreground: '6A9955' },
+          { token: 'log.error', foreground: 'F14C4C', fontStyle: 'bold' },
+          { token: 'log.warn', foreground: 'CCA700', fontStyle: 'bold' },
+          { token: 'log.info', foreground: '3794FF', fontStyle: 'bold' },
+          { token: 'log.debug', foreground: '888888', fontStyle: 'bold' },
+          { token: 'log.module', foreground: 'C586C0' },
+          { token: 'log.number', foreground: 'B5CEA8' },
+          { token: 'log.string', foreground: 'CE9178' },
+          { token: 'log.url', foreground: '4EC9B0', fontStyle: 'underline' },
+          { token: 'log.ip', foreground: '569CD6' }
         ],
         colors: {}
       });
 
-      monaco.editor.defineTheme('gcode-light', {
+      monaco.editor.defineTheme('ncsender-light', {
         base: 'vs',
         inherit: true,
         rules: [
           { token: 'comment', foreground: '008000', fontStyle: 'italic' },
-          { token: 'gcode-rapid', foreground: 'FF6600', fontStyle: 'bold' },
-          { token: 'gcode-cutting', foreground: '0000FF', fontStyle: 'bold' },
+          { token: 'number', foreground: '098658' },
+          { token: 'gcode-rapid', foreground: 'E67E22', fontStyle: 'bold' },
+          { token: 'gcode-cutting', foreground: '2E86C1', fontStyle: 'bold' },
           { token: 'gcode-g', foreground: 'AF00DB' },
           { token: 'gcode-m', foreground: '795E26' },
           { token: 'gcode-tool', foreground: '267F99' },
           { token: 'gcode-spindle', foreground: 'A31515' },
           { token: 'gcode-feed', foreground: '098658' },
-          { token: 'gcode-coord-x', foreground: 'CD3131' },
+          { token: 'gcode-coord-x', foreground: 'C72828' },
           { token: 'gcode-coord-y', foreground: '267F99' },
-          { token: 'gcode-coord-z', foreground: '0000FF' },
-          { token: 'gcode-coord-other', foreground: '001080' },
-          { token: 'gcode-line-number', foreground: '858585' },
-          { token: 'number', foreground: '098658' },
+          { token: 'gcode-coord-z', foreground: '2E86C1' },
+          { token: 'gcode-coord-other', foreground: '0070C1' },
+          { token: 'gcode-line-number', foreground: '999999' },
+          { token: 'log.timestamp', foreground: '008000' },
+          { token: 'log.error', foreground: 'C41E3A', fontStyle: 'bold' },
+          { token: 'log.warn', foreground: 'B8860B', fontStyle: 'bold' },
+          { token: 'log.info', foreground: '0066CC', fontStyle: 'bold' },
+          { token: 'log.debug', foreground: '808080', fontStyle: 'bold' },
+          { token: 'log.module', foreground: 'AF00DB' },
+          { token: 'log.number', foreground: '098658' },
+          { token: 'log.string', foreground: 'A31515' },
+          { token: 'log.url', foreground: '267F99', fontStyle: 'underline' },
+          { token: 'log.ip', foreground: '0000FF' }
         ],
-        colors: {}
+        colors: {
+          'editor.background': '#f8f8f8',
+          'editorGutter.background': '#f8f8f8'
+        }
       });
     }
 
     registerGcodeLanguage();
 
     var isLightTheme = function() { return document.body.classList.contains('theme-light'); };
-    var getMonacoTheme = function() { return isLightTheme() ? 'gcode-light' : 'gcode-dark'; };
+    var getMonacoTheme = function() { return isLightTheme() ? 'ncsender-light' : 'ncsender-dark'; };
 
     var monacoOptions = {
       language: 'gcode',
