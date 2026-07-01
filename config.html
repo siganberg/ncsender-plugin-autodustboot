@@ -6,35 +6,27 @@
     max-width: 600px;
   }
 
-  /* Mode selector */
-  .adb-mode {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-bottom: 20px;
-    padding: 4px;
+  /* Mode toggle (Wired <-> Wireless) */
+  .adb-mode-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 12px;
+    margin-bottom: 6px;
     border: 1px solid var(--color-border, #ddd);
     border-radius: 8px;
     background: var(--color-surface-muted, #f5f5f5);
   }
-  .adb-mode-btn {
-    padding: 10px 8px;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--color-text-secondary, #666);
-    font-size: 0.9rem;
+  .adb-mode-label {
     font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--color-text-secondary, #888);
     cursor: pointer;
-    text-align: center;
+    user-select: none;
   }
-  .adb-mode-btn small { display: block; font-weight: 400; font-size: 0.72rem; margin-top: 2px; opacity: 0.8; }
-  .adb-mode-btn.active {
-    background: var(--color-surface, #fff);
-    border-color: var(--color-accent, #4a90e2);
-    color: var(--color-text-primary, #222);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  }
+  .adb-mode-label.active { color: var(--color-text-primary, #222); }
+  .adb-mode-help { text-align: center; margin-top: 0; margin-bottom: 20px; }
 
   .adb-form-row {
     display: grid;
@@ -83,15 +75,16 @@
   .adb-btn-primary:hover { background: var(--color-accent-hover, #3a7bc8); }
 </style>
 <div class="adb-dialog">
-  <!-- Control-method selector -->
-  <div class="adb-mode">
-    <button type="button" class="adb-mode-btn" id="adb-mode-wired" data-mode="wired">
-      Wired <small>Pneumatic (M8/M9 G-code)</small>
-    </button>
-    <button type="button" class="adb-mode-btn" id="adb-mode-wireless" data-mode="wireless">
-      Wireless <small>ESP-NOW stepper</small>
-    </button>
+  <!-- Control-method toggle: unchecked = Wired, checked = Wireless -->
+  <div class="adb-mode-row">
+    <span class="adb-mode-label" id="adb-label-wired">Wired</span>
+    <label class="adb-toggle-switch">
+      <input type="checkbox" id="adb-modeToggle">
+      <span class="adb-toggle-slider"></span>
+    </label>
+    <span class="adb-mode-label" id="adb-label-wireless">Wireless</span>
   </div>
+  <p class="adb-help-text adb-mode-help" id="adb-mode-help"></p>
 
   <!-- ==== WIRED (pneumatic) ==== -->
   <div id="adb-wired">
@@ -357,23 +350,32 @@
     }
     window.addEventListener('unload', stopWirelessLive);
 
-    // ---------- Mode switching ----------
+    // ---------- Mode switching (toggle: off = wired, on = wireless) ----------
+    var MODE_HELP = {
+      wired: 'Wired: inject your G-code retract/expand sequences (pneumatic M8/M9).',
+      wireless: 'Wireless: drive the ESP-NOW stepper board directly through the dongle.'
+    };
     function setMode(mode) {
       currentMode = (mode === 'wireless') ? 'wireless' : 'wired';
-      document.getElementById('adb-mode-wired').classList.toggle('active', currentMode === 'wired');
-      document.getElementById('adb-mode-wireless').classList.toggle('active', currentMode === 'wireless');
+      document.getElementById('adb-modeToggle').checked = currentMode === 'wireless';
+      document.getElementById('adb-label-wired').classList.toggle('active', currentMode === 'wired');
+      document.getElementById('adb-label-wireless').classList.toggle('active', currentMode === 'wireless');
+      document.getElementById('adb-mode-help').textContent = MODE_HELP[currentMode];
       document.getElementById('adb-wired').style.display = currentMode === 'wired' ? '' : 'none';
       document.getElementById('adb-wireless').style.display = currentMode === 'wireless' ? '' : 'none';
       if (currentMode === 'wired') {
+        stopWirelessLive();
         if (retractEditor) retractEditor.layout();
         if (expandEditor) expandEditor.layout();
       } else {
         startWirelessLive();
       }
     }
-    document.querySelectorAll('.adb-mode-btn').forEach(function(b) {
-      b.addEventListener('click', function() { setMode(b.getAttribute('data-mode')); });
+    document.getElementById('adb-modeToggle').addEventListener('change', function() {
+      setMode(this.checked ? 'wireless' : 'wired');
     });
+    document.getElementById('adb-label-wired').addEventListener('click', function() { setMode('wired'); });
+    document.getElementById('adb-label-wireless').addEventListener('click', function() { setMode('wireless'); });
 
     // ---------- Load / save ----------
     function initUI(settings) {
