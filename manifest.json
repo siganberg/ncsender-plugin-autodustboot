@@ -20,7 +20,6 @@
   "events": ["onBeforeCommand", "onAfterJobEnd"],
   "permissions": ["gcode.modify"],
   "toolMenu": [
-    { "id": "open-config", "label": "AutoDustBoot", "icon": "icon.png", "clientOnly": true },
-    { "id": "open-control", "label": "AutoDustBoot Control", "icon": "icon.png", "clientOnly": true }
+    { "id": "open-config", "label": "AutoDustBoot", "icon": "icon.png", "clientOnly": true }
   ]
 }

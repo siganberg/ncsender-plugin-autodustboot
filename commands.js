@@ -50,6 +50,7 @@ let isToolChanging = false;
 const buildInitialConfig = function(raw) {
   if (!raw) raw = {};
   return {
+    mode: raw.mode === 'wireless' ? 'wireless' : 'wired',
     retractCommand: raw.retractCommand || 'M8\nG4 P0.1\nM9',
     expandCommand: raw.expandCommand || 'M8',
     retractOnHome: raw.retractOnHome !== undefined ? raw.retractOnHome : true,
@@ -61,6 +62,12 @@ const buildInitialConfig = function(raw) {
 // === Command Processing ===
 
 function onBeforeCommand(commands, context, settings) {
+  // Wireless mode drives the ESP-NOW stepper directly (manual controls in the dialog);
+  // it does not inject pneumatic M8/M9 G-code into the stream.
+  if (settings.mode === 'wireless') {
+    return commands;
+  }
+
   const expandCommand = settings.expandCommand;
   const retractCommand = settings.retractCommand;
   const retractOnHome = settings.retractOnHome;

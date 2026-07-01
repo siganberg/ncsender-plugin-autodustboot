@@ -42,22 +42,6 @@ export async function onLoad(ctx) {
 
     ctx.showDialog('AutoDustBoot Settings', html, { closable: true, width: '650px' });
   }, { icon: 'icon.png' });
-
-  // Live device status + manual controls, driven by the app's generic dongle bridge
-  // (REST /api/dongle/devices/<name> + the window.ncSender.onServerEvent WS feed). This is
-  // independent of the pneumatic G-code injection above.
-  ctx.registerToolMenu('AutoDustBoot Control', async () => {
-    ctx.log('AutoDustBoot control opened');
-
-    const storedSettings = ctx.getSettings() || {};
-    const appSettings = ctx.getAppSettings() || {};
-    const serverPort = resolveServerPort(storedSettings, appSettings);
-
-    let html = readFileSync(join(__dirname, 'control.html'), 'utf-8');
-    html = html.replace('__SERVER_PORT__', String(serverPort));
-
-    ctx.showDialog('AutoDustBoot', html, { closable: true, width: '440px' });
-  }, { icon: 'icon.png' });
 }
 
 export function onUnload() {

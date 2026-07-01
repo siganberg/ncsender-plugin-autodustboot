@@ -5,149 +5,173 @@
     color: var(--color-text-primary, #333);
     max-width: 600px;
   }
+
+  /* Mode selector */
+  .adb-mode {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 20px;
+    padding: 4px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 8px;
+    background: var(--color-surface-muted, #f5f5f5);
+  }
+  .adb-mode-btn {
+    padding: 10px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-secondary, #666);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+  }
+  .adb-mode-btn small { display: block; font-weight: 400; font-size: 0.72rem; margin-top: 2px; opacity: 0.8; }
+  .adb-mode-btn.active {
+    background: var(--color-surface, #fff);
+    border-color: var(--color-accent, #4a90e2);
+    color: var(--color-text-primary, #222);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
   .adb-form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 20px;
     margin-bottom: 20px;
   }
-  .adb-form-group {
-    display: flex;
-    flex-direction: column;
-  }
-  .adb-form-group > label {
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: var(--color-text-primary, #333);
-  }
-  .adb-toggle-switch {
-    position: relative;
-    width: 50px;
-    height: 28px;
-    margin-top: 8px;
-  }
-  .adb-toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-  .adb-toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #ccc;
-    transition: .4s;
-    border-radius: 28px;
-  }
-  .adb-toggle-slider:before {
-    position: absolute;
-    content: "";
-    height: 20px;
-    width: 20px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    transition: .4s;
-    border-radius: 50%;
-  }
-  .adb-toggle-switch input:checked + .adb-toggle-slider {
-    background-color: var(--color-accent, #4a90e2);
-  }
-  .adb-toggle-switch input:checked + .adb-toggle-slider:before {
-    transform: translateX(22px);
-  }
-  .adb-help-text {
-    font-size: 0.85rem;
-    color: var(--color-text-secondary, #666);
-    margin-top: 6px;
-    line-height: 1.4;
-  }
-  .adb-monaco-container {
-    height: 80px;
-    border: 1px solid var(--color-border, #ddd);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-  .adb-button-row {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin-top: 24px;
-    padding-top: 16px;
-    border-top: 1px solid var(--color-border, #ddd);
-  }
-  .adb-btn {
-    padding: 10px 24px;
-    border-radius: 4px;
-    font-size: 0.9rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.2s, border-color 0.2s;
-  }
-  .adb-btn-secondary {
-    background: var(--color-surface, #fff);
-    border: 1px solid var(--color-border, #ddd);
-    color: var(--color-text-primary, #333);
-  }
-  .adb-btn-secondary:hover {
-    background: var(--color-surface-muted, #f5f5f5);
-  }
-  .adb-btn-primary {
-    background: var(--color-accent, #4a90e2);
-    border: 1px solid var(--color-accent, #4a90e2);
-    color: white;
-  }
-  .adb-btn-primary:hover {
-    background: var(--color-accent-hover, #3a7bc8);
-  }
+  .adb-form-group { display: flex; flex-direction: column; }
+  .adb-form-group > label { margin-bottom: 8px; font-weight: 600; color: var(--color-text-primary, #333); }
+  .adb-toggle-switch { position: relative; width: 50px; height: 28px; margin-top: 8px; }
+  .adb-toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .adb-toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 28px; }
+  .adb-toggle-slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+  .adb-toggle-switch input:checked + .adb-toggle-slider { background-color: var(--color-accent, #4a90e2); }
+  .adb-toggle-switch input:checked + .adb-toggle-slider:before { transform: translateX(22px); }
+  .adb-help-text { font-size: 0.85rem; color: var(--color-text-secondary, #666); margin-top: 6px; line-height: 1.4; }
+  .adb-monaco-container { height: 80px; border: 1px solid var(--color-border, #ddd); border-radius: 4px; overflow: hidden; }
+
+  /* Wireless panel */
+  .adb-status-card { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 8px; border: 1px solid var(--color-border, #ddd); background: var(--color-surface-muted, #f5f5f5); color: var(--color-text-secondary, #666); }
+  .adb-status-card.connected { border-color: #22c55e; background: rgba(34,197,94,0.08); color: var(--color-text-primary, #222); }
+  .adb-dot { width: 12px; height: 12px; border-radius: 50%; background: #9ca3af; flex: 0 0 auto; }
+  .adb-status-card.connected .adb-dot { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,0.18); }
+  .adb-status-title { font-weight: 600; font-size: 1rem; margin-bottom: 3px; color: var(--color-text-primary, #222); }
+  .adb-status-sub { font-size: 0.82rem; line-height: 1.35; color: var(--color-text-secondary, #666); }
+  .adb-details { margin-top: 14px; border: 1px solid var(--color-border, #ddd); border-radius: 8px; overflow: hidden; }
+  .adb-row { display: flex; justify-content: space-between; padding: 9px 14px; font-size: 0.88rem; }
+  .adb-row:not(:last-child) { border-bottom: 1px solid var(--color-border, #eee); }
+  .adb-key { color: var(--color-text-secondary, #666); }
+  .adb-val { font-variant-numeric: tabular-nums; color: var(--color-text-primary, #222); font-weight: 500; }
+  .adb-controls { margin-top: 16px; }
+  .adb-jog { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .adb-actionrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .adb-ctl { padding: 10px 8px; border-radius: 6px; border: 1px solid var(--color-border, #ddd); background: var(--color-surface, #fff); color: var(--color-text-primary, #222); font-size: 0.88rem; font-weight: 500; cursor: pointer; user-select: none; }
+  .adb-ctl:hover:not(:disabled) { background: var(--color-surface-muted, #f0f0f0); }
+  .adb-ctl:active:not(:disabled) { background: var(--color-accent, #4a90e2); color: #fff; border-color: var(--color-accent, #4a90e2); }
+  .adb-ctl:disabled { opacity: 0.45; cursor: not-allowed; }
+  .adb-ctl.jog { padding: 14px 8px; font-size: 0.95rem; }
+  .adb-hint { font-size: 0.72rem; color: var(--color-text-secondary, #888); font-weight: 400; }
+
+  .adb-button-row { display: flex; justify-content: center; gap: 10px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-border, #ddd); }
+  .adb-btn { padding: 10px 24px; border-radius: 4px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: background-color 0.2s, border-color 0.2s; }
+  .adb-btn-secondary { background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd); color: var(--color-text-primary, #333); }
+  .adb-btn-secondary:hover { background: var(--color-surface-muted, #f5f5f5); }
+  .adb-btn-primary { background: var(--color-accent, #4a90e2); border: 1px solid var(--color-accent, #4a90e2); color: white; }
+  .adb-btn-primary:hover { background: var(--color-accent-hover, #3a7bc8); }
 </style>
 <div class="adb-dialog">
-  <div class="adb-form-row">
-    <div class="adb-form-group">
-      <label>Retract Sequence</label>
-      <div class="adb-monaco-container" id="adb-retractCommand-editor"></div>
-      <p class="adb-help-text">G-code sequence to retract the dust boot</p>
+  <!-- Control-method selector -->
+  <div class="adb-mode">
+    <button type="button" class="adb-mode-btn" id="adb-mode-wired" data-mode="wired">
+      Wired <small>Pneumatic (M8/M9 G-code)</small>
+    </button>
+    <button type="button" class="adb-mode-btn" id="adb-mode-wireless" data-mode="wireless">
+      Wireless <small>ESP-NOW stepper</small>
+    </button>
+  </div>
+
+  <!-- ==== WIRED (pneumatic) ==== -->
+  <div id="adb-wired">
+    <div class="adb-form-row">
+      <div class="adb-form-group">
+        <label>Retract Sequence</label>
+        <div class="adb-monaco-container" id="adb-retractCommand-editor"></div>
+        <p class="adb-help-text">G-code sequence to retract the dust boot</p>
+      </div>
+      <div class="adb-form-group">
+        <label>Expand Sequence</label>
+        <div class="adb-monaco-container" id="adb-expandCommand-editor"></div>
+        <p class="adb-help-text">G-code sequence to expand the dust boot</p>
+      </div>
     </div>
 
-    <div class="adb-form-group">
-      <label>Expand Sequence</label>
-      <div class="adb-monaco-container" id="adb-expandCommand-editor"></div>
-      <p class="adb-help-text">G-code sequence to expand the dust boot</p>
+    <div class="adb-form-row">
+      <div class="adb-form-group">
+        <label>Retract on Home</label>
+        <label class="adb-toggle-switch">
+          <input type="checkbox" id="adb-retractOnHome" checked>
+          <span class="adb-toggle-slider"></span>
+        </label>
+        <p class="adb-help-text">Automatically retract when homing ($H)</p>
+      </div>
+      <div class="adb-form-group">
+        <label>Retract on Rapid Move (G0)</label>
+        <label class="adb-toggle-switch">
+          <input type="checkbox" id="adb-retractOnRapidMove" checked>
+          <span class="adb-toggle-slider"></span>
+        </label>
+        <p class="adb-help-text">Retract during rapid moves (except when running jobs)</p>
+      </div>
+    </div>
+
+    <div class="adb-form-row">
+      <div class="adb-form-group">
+        <label>Show Added GCode in Terminal</label>
+        <label class="adb-toggle-switch">
+          <input type="checkbox" id="adb-showAddedGCode">
+          <span class="adb-toggle-slider"></span>
+        </label>
+        <p class="adb-help-text">When disabled, commands are executed silently</p>
+      </div>
     </div>
   </div>
 
-  <div class="adb-form-row">
-    <div class="adb-form-group">
-      <label>Retract on Home</label>
-      <label class="adb-toggle-switch">
-        <input type="checkbox" id="adb-retractOnHome" checked>
-        <span class="adb-toggle-slider"></span>
-      </label>
-      <p class="adb-help-text">Automatically retract when homing ($H)</p>
+  <!-- ==== WIRELESS (ESP-NOW stepper) ==== -->
+  <div id="adb-wireless" style="display:none">
+    <div id="adb-statusCard" class="adb-status-card">
+      <span class="adb-dot"></span>
+      <div>
+        <div id="adb-statusTitle" class="adb-status-title">Checking…</div>
+        <div id="adb-statusSub" class="adb-status-sub">Contacting the AutoDustBoot through the dongle…</div>
+      </div>
     </div>
 
-    <div class="adb-form-group">
-      <label>Retract on Rapid Move (G0)</label>
-      <label class="adb-toggle-switch">
-        <input type="checkbox" id="adb-retractOnRapidMove" checked>
-        <span class="adb-toggle-slider"></span>
-      </label>
-      <p class="adb-help-text">Retract during rapid moves (except when running jobs)</p>
+    <div id="adb-wl-details" class="adb-details" style="display:none">
+      <div class="adb-row"><span class="adb-key">State</span><span class="adb-val" id="adb-vState">—</span></div>
+      <div class="adb-row"><span class="adb-key">Position</span><span class="adb-val" id="adb-vPos">—</span></div>
+      <div class="adb-row"><span class="adb-key">Saved</span><span class="adb-val" id="adb-vSaved">—</span></div>
+      <div class="adb-row"><span class="adb-key">Homed</span><span class="adb-val" id="adb-vHomed">—</span></div>
     </div>
-  </div>
 
-  <div class="adb-form-row">
-    <div class="adb-form-group">
-      <label>Show Added GCode in Terminal</label>
-      <label class="adb-toggle-switch">
-        <input type="checkbox" id="adb-showAddedGCode">
-        <span class="adb-toggle-slider"></span>
-      </label>
-      <p class="adb-help-text">When disabled, commands are executed silently</p>
+    <div class="adb-controls">
+      <div class="adb-jog">
+        <button type="button" class="adb-ctl jog" data-jog="up">▲ Up <span class="adb-hint">(hold)</span></button>
+        <button type="button" class="adb-ctl jog" data-jog="down">▼ Down <span class="adb-hint">(hold)</span></button>
+      </div>
+      <div class="adb-actionrow">
+        <button type="button" class="adb-ctl" data-send="goto:0">Retract</button>
+        <button type="button" class="adb-ctl" id="adb-btnExpand">Expand</button>
+        <button type="button" class="adb-ctl" data-send="home">Home</button>
+        <button type="button" class="adb-ctl" data-send="save" title="Save current position as the Expand target">Save</button>
+      </div>
     </div>
+    <p class="adb-help-text" style="margin-top:14px">
+      Wireless mode controls the stepper directly and does <b>not</b> inject the pneumatic M8/M9 G-code.
+      If the board was never paired, open the dongle pairing window ($PAIR) so it can bind.
+    </p>
   </div>
 
   <div class="adb-button-row">
@@ -159,11 +183,13 @@
 <script>
   (function() {
     var FALLBACK_PORT = __SERVER_PORT__;
+    var DEVICE = 'autodustboot';
     var DEFAULT_RETRACT = 'M8\nG4 P0.1\nM9';
     var DEFAULT_EXPAND = 'M8';
 
     var retractEditor = null;
     var expandEditor = null;
+    var currentMode = 'wired';
 
     var resolveApiBaseUrl = function() {
       if (window.ncSender && typeof window.ncSender.getApiBaseUrl === 'function') {
@@ -171,203 +197,221 @@
       }
       return '';
     };
-
     var BASE_URL = resolveApiBaseUrl();
 
-    // Register G-code language and theme if not already registered
+    // ---------- Monaco (wired) ----------
     function registerGcodeLanguage() {
       if (typeof monaco === 'undefined') return;
-
-      // Check if already registered
       var languages = monaco.languages.getLanguages();
       if (languages.some(function(lang) { return lang.id === 'gcode'; })) return;
-
       monaco.languages.register({ id: 'gcode' });
-
       monaco.languages.setMonarchTokensProvider('gcode', {
-        tokenizer: {
-          root: [
-            [/\(.*?\)/, 'comment'],
-            [/;.*$/, 'comment'],
-            [/\b[Gg]0*(?=\s|$|[A-Za-z])/, 'gcode-rapid'],
-            [/\b[Gg][1-3]\b/, 'gcode-cutting'],
-            [/\b[Gg]\d+\.?\d*/, 'gcode-g'],
-            [/\b[Mm]\d+/, 'gcode-m'],
-            [/\b[Tt]\d+/, 'gcode-tool'],
-            [/\b[Ss]\d+\.?\d*/, 'gcode-spindle'],
-            [/\b[Ff]\d+\.?\d*/, 'gcode-feed'],
-            [/\b[Xx]-?\d+\.?\d*/, 'gcode-coord-x'],
-            [/\b[Yy]-?\d+\.?\d*/, 'gcode-coord-y'],
-            [/\b[Zz]-?\d+\.?\d*/, 'gcode-coord-z'],
-            [/\b[AaBbCcIiJjKk]-?\d+\.?\d*/, 'gcode-coord-other'],
-            [/\b[Nn]\d+/, 'gcode-line-number'],
-            [/-?\d+\.?\d*/, 'number'],
-          ]
-        }
+        tokenizer: { root: [
+          [/\(.*?\)/, 'comment'],
+          [/;.*$/, 'comment'],
+          [/\b[Gg]0*(?=\s|$|[A-Za-z])/, 'gcode-rapid'],
+          [/\b[Gg][1-3]\b/, 'gcode-cutting'],
+          [/\b[Gg]\d+\.?\d*/, 'gcode-g'],
+          [/\b[Mm]\d+/, 'gcode-m'],
+          [/\b[Tt]\d+/, 'gcode-tool'],
+          [/\b[Ss]\d+\.?\d*/, 'gcode-spindle'],
+          [/\b[Ff]\d+\.?\d*/, 'gcode-feed'],
+          [/\b[Xx]-?\d+\.?\d*/, 'gcode-coord-x'],
+          [/\b[Yy]-?\d+\.?\d*/, 'gcode-coord-y'],
+          [/\b[Zz]-?\d+\.?\d*/, 'gcode-coord-z'],
+          [/\b[AaBbCcIiJjKk]-?\d+\.?\d*/, 'gcode-coord-other'],
+          [/\b[Nn]\d+/, 'gcode-line-number'],
+          [/-?\d+\.?\d*/, 'number'],
+        ] }
       });
-
-      // Shared ncSender theme (matches the host app's theme so the global
-      // monaco.editor.setTheme() call from any other view doesn't strip
-      // colors from the editors here).
-      monaco.editor.defineTheme('ncsender-dark', {
-        base: 'vs-dark',
-        inherit: true,
-        rules: [
-          { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
-          { token: 'number', foreground: 'B5CEA8' },
-          { token: 'gcode-rapid', foreground: 'FF8C00', fontStyle: 'bold' },
-          { token: 'gcode-cutting', foreground: '569CD6', fontStyle: 'bold' },
-          { token: 'gcode-g', foreground: 'C586C0' },
-          { token: 'gcode-m', foreground: 'DCDCAA' },
-          { token: 'gcode-tool', foreground: '4EC9B0' },
-          { token: 'gcode-spindle', foreground: 'CE9178' },
-          { token: 'gcode-feed', foreground: 'B5CEA8' },
-          { token: 'gcode-coord-x', foreground: 'F14C4C' },
-          { token: 'gcode-coord-y', foreground: '4EC9B0' },
-          { token: 'gcode-coord-z', foreground: '569CD6' },
-          { token: 'gcode-coord-other', foreground: '9CDCFE' },
-          { token: 'gcode-line-number', foreground: '858585' },
-          { token: 'log.timestamp', foreground: '6A9955' },
-          { token: 'log.error', foreground: 'F14C4C', fontStyle: 'bold' },
-          { token: 'log.warn', foreground: 'CCA700', fontStyle: 'bold' },
-          { token: 'log.info', foreground: '3794FF', fontStyle: 'bold' },
-          { token: 'log.debug', foreground: '888888', fontStyle: 'bold' },
-          { token: 'log.module', foreground: 'C586C0' },
-          { token: 'log.number', foreground: 'B5CEA8' },
-          { token: 'log.string', foreground: 'CE9178' },
-          { token: 'log.url', foreground: '4EC9B0', fontStyle: 'underline' },
-          { token: 'log.ip', foreground: '569CD6' }
-        ],
-        colors: {}
-      });
-
-      monaco.editor.defineTheme('ncsender-light', {
-        base: 'vs',
-        inherit: true,
-        rules: [
-          { token: 'comment', foreground: '008000', fontStyle: 'italic' },
-          { token: 'number', foreground: '098658' },
-          { token: 'gcode-rapid', foreground: 'E67E22', fontStyle: 'bold' },
-          { token: 'gcode-cutting', foreground: '2E86C1', fontStyle: 'bold' },
-          { token: 'gcode-g', foreground: 'AF00DB' },
-          { token: 'gcode-m', foreground: '795E26' },
-          { token: 'gcode-tool', foreground: '267F99' },
-          { token: 'gcode-spindle', foreground: 'A31515' },
-          { token: 'gcode-feed', foreground: '098658' },
-          { token: 'gcode-coord-x', foreground: 'C72828' },
-          { token: 'gcode-coord-y', foreground: '267F99' },
-          { token: 'gcode-coord-z', foreground: '2E86C1' },
-          { token: 'gcode-coord-other', foreground: '0070C1' },
-          { token: 'gcode-line-number', foreground: '999999' },
-          { token: 'log.timestamp', foreground: '008000' },
-          { token: 'log.error', foreground: 'C41E3A', fontStyle: 'bold' },
-          { token: 'log.warn', foreground: 'B8860B', fontStyle: 'bold' },
-          { token: 'log.info', foreground: '0066CC', fontStyle: 'bold' },
-          { token: 'log.debug', foreground: '808080', fontStyle: 'bold' },
-          { token: 'log.module', foreground: 'AF00DB' },
-          { token: 'log.number', foreground: '098658' },
-          { token: 'log.string', foreground: 'A31515' },
-          { token: 'log.url', foreground: '267F99', fontStyle: 'underline' },
-          { token: 'log.ip', foreground: '0000FF' }
-        ],
-        colors: {
-          'editor.background': '#f8f8f8',
-          'editorGutter.background': '#f8f8f8'
-        }
-      });
+      monaco.editor.defineTheme('ncsender-dark', { base: 'vs-dark', inherit: true, rules: [
+        { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
+        { token: 'number', foreground: 'B5CEA8' },
+        { token: 'gcode-rapid', foreground: 'FF8C00', fontStyle: 'bold' },
+        { token: 'gcode-cutting', foreground: '569CD6', fontStyle: 'bold' },
+        { token: 'gcode-g', foreground: 'C586C0' },
+        { token: 'gcode-m', foreground: 'DCDCAA' },
+        { token: 'gcode-tool', foreground: '4EC9B0' },
+        { token: 'gcode-spindle', foreground: 'CE9178' },
+        { token: 'gcode-feed', foreground: 'B5CEA8' },
+        { token: 'gcode-coord-x', foreground: 'F14C4C' },
+        { token: 'gcode-coord-y', foreground: '4EC9B0' },
+        { token: 'gcode-coord-z', foreground: '569CD6' },
+        { token: 'gcode-coord-other', foreground: '9CDCFE' },
+        { token: 'gcode-line-number', foreground: '858585' }
+      ], colors: {} });
+      monaco.editor.defineTheme('ncsender-light', { base: 'vs', inherit: true, rules: [
+        { token: 'comment', foreground: '008000', fontStyle: 'italic' },
+        { token: 'number', foreground: '098658' },
+        { token: 'gcode-rapid', foreground: 'E67E22', fontStyle: 'bold' },
+        { token: 'gcode-cutting', foreground: '2E86C1', fontStyle: 'bold' },
+        { token: 'gcode-g', foreground: 'AF00DB' },
+        { token: 'gcode-m', foreground: '795E26' },
+        { token: 'gcode-tool', foreground: '267F99' },
+        { token: 'gcode-spindle', foreground: 'A31515' },
+        { token: 'gcode-feed', foreground: '098658' },
+        { token: 'gcode-coord-x', foreground: 'C72828' },
+        { token: 'gcode-coord-y', foreground: '267F99' },
+        { token: 'gcode-coord-z', foreground: '2E86C1' },
+        { token: 'gcode-coord-other', foreground: '0070C1' },
+        { token: 'gcode-line-number', foreground: '999999' }
+      ], colors: { 'editor.background': '#f8f8f8', 'editorGutter.background': '#f8f8f8' } });
     }
-
     registerGcodeLanguage();
-
     var isLightTheme = function() { return document.body.classList.contains('theme-light'); };
     var getMonacoTheme = function() { return isLightTheme() ? 'ncsender-light' : 'ncsender-dark'; };
+    var monacoOptions = { language: 'gcode', theme: getMonacoTheme(), minimap: { enabled: false }, lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true, fontSize: 12, tabSize: 2 };
 
-    var monacoOptions = {
-      language: 'gcode',
-      theme: getMonacoTheme(),
-      minimap: { enabled: false },
-      lineNumbers: 'on',
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      fontSize: 12,
-      tabSize: 2
-    };
+    // ---------- Wireless status/controls ----------
+    var wl = { connected: false, pos: null, saved: null, state: null, homed: null, lastSeenMs: -1 };
 
-    function init() {
-      // Load settings
-      var settingsUrl = BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings';
-      fetch(settingsUrl)
-        .then(function(response) {
-          if (response.ok) return response.json();
-          return {};
-        })
-        .then(function(settings) {
-          if (!settings) settings = {};
-          initUI(settings);
-        })
-        .catch(function(error) {
-          console.error('Failed to load settings:', error);
-          initUI({});
-        });
+    function parsePayload(payload) {
+      if (!payload) return;
+      payload.split(/\s+/).forEach(function(tok) {
+        var eq = tok.indexOf('=');
+        if (eq <= 0) return;
+        var k = tok.slice(0, eq), v = tok.slice(eq + 1);
+        if (k === 'pos') wl.pos = parseInt(v, 10);
+        else if (k === 'saved') wl.saved = parseInt(v, 10);
+        else if (k === 'state') wl.state = v;
+        else if (k === 'homed') wl.homed = (v === '1' || v.toLowerCase() === 'true');
+      });
     }
 
-    function initUI(settings) {
-      // Initialize Monaco editors
-      if (typeof monaco !== 'undefined') {
-        var retractContainer = document.getElementById('adb-retractCommand-editor');
-        if (retractContainer) {
-          retractEditor = monaco.editor.create(retractContainer, Object.assign({}, monacoOptions, {
-            value: settings.retractCommand || DEFAULT_RETRACT
-          }));
-        }
+    function renderWireless() {
+      var card = document.getElementById('adb-statusCard');
+      card.classList.toggle('connected', !!wl.connected);
+      document.getElementById('adb-statusTitle').textContent = wl.connected ? 'Paired & Connected' : 'Not detected';
+      document.getElementById('adb-statusSub').textContent = wl.connected
+        ? ('Linked through the dongle' + (wl.lastSeenMs >= 0 ? ' · last seen ' + wl.lastSeenMs + ' ms ago' : ''))
+        : 'Not receiving data. Power on the AutoDustBoot and pair it through the dongle ($PAIR).';
+      document.getElementById('adb-wl-details').style.display = wl.connected ? '' : 'none';
+      document.getElementById('adb-vState').textContent = wl.state == null ? '—' : wl.state;
+      document.getElementById('adb-vPos').textContent = wl.pos == null ? '—' : wl.pos;
+      document.getElementById('adb-vSaved').textContent = wl.saved == null ? '—' : wl.saved;
+      document.getElementById('adb-vHomed').textContent = wl.homed == null ? '—' : (wl.homed ? 'Yes' : 'No');
+      document.querySelectorAll('#adb-wireless .adb-ctl').forEach(function(b) { b.disabled = !wl.connected; });
+    }
 
-        var expandContainer = document.getElementById('adb-expandCommand-editor');
-        if (expandContainer) {
-          expandEditor = monaco.editor.create(expandContainer, Object.assign({}, monacoOptions, {
-            value: settings.expandCommand || DEFAULT_EXPAND
-          }));
-        }
+    function send(payload) {
+      fetch(BASE_URL + '/api/dongle/devices/' + DEVICE + '/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload: payload })
+      }).catch(function() {});
+    }
 
-        // Watch for theme changes
-        var themeObserver = new MutationObserver(function() {
-          monaco.editor.setTheme(getMonacoTheme());
+    function fetchDevice() {
+      return fetch(BASE_URL + '/api/dongle/devices/' + DEVICE)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (!d) { renderWireless(); return; }
+          wl.connected = !!d.connected;
+          wl.lastSeenMs = typeof d.lastSeenMs === 'number' ? d.lastSeenMs : -1;
+          parsePayload(d.lastMessage);
+          renderWireless();
+        })
+        .catch(function() { renderWireless(); });
+    }
+
+    // Buttons
+    document.querySelectorAll('#adb-wireless [data-send]').forEach(function(b) {
+      b.addEventListener('click', function() { send(b.getAttribute('data-send')); });
+    });
+    document.getElementById('adb-btnExpand').addEventListener('click', function() {
+      send('goto:' + (wl.saved != null ? wl.saved : 0));
+    });
+    var jogTimer = null;
+    function startJog(dir) { send(dir); if (jogTimer) clearInterval(jogTimer); jogTimer = setInterval(function() { send(dir); }, 300); }
+    function stopJog() { if (!jogTimer) return; clearInterval(jogTimer); jogTimer = null; send('stop'); }
+    document.querySelectorAll('#adb-wireless [data-jog]').forEach(function(b) {
+      var dir = b.getAttribute('data-jog');
+      b.addEventListener('mousedown', function() { startJog(dir); });
+      b.addEventListener('mouseup', stopJog);
+      b.addEventListener('mouseleave', stopJog);
+      b.addEventListener('touchstart', function(e) { e.preventDefault(); startJog(dir); }, { passive: false });
+      b.addEventListener('touchend', function(e) { e.preventDefault(); stopJog(); }, { passive: false });
+    });
+
+    // Live updates (additive bridge; REST-poll fallback on older apps)
+    var offMsg = null, offChg = null, pollTimer = null;
+    function startWirelessLive() {
+      fetchDevice();
+      if (window.ncSender && typeof window.ncSender.onServerEvent === 'function') {
+        if (!offMsg) offMsg = window.ncSender.onServerEvent('dongle:device-message', function(m) {
+          if (!m || m.name !== DEVICE) return;
+          wl.connected = true; wl.lastSeenMs = 0; parsePayload(m.payload); renderWireless();
         });
+        if (!offChg) offChg = window.ncSender.onServerEvent('dongle:device-changed', function(c) {
+          if (!c || c.name !== DEVICE) return;
+          wl.connected = !!c.connected; renderWireless();
+        });
+      } else if (!pollTimer) {
+        pollTimer = setInterval(fetchDevice, 1000);
+      }
+    }
+    function stopWirelessLive() {
+      stopJog();
+      if (offMsg) { offMsg(); offMsg = null; }
+      if (offChg) { offChg(); offChg = null; }
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+    window.addEventListener('unload', stopWirelessLive);
+
+    // ---------- Mode switching ----------
+    function setMode(mode) {
+      currentMode = (mode === 'wireless') ? 'wireless' : 'wired';
+      document.getElementById('adb-mode-wired').classList.toggle('active', currentMode === 'wired');
+      document.getElementById('adb-mode-wireless').classList.toggle('active', currentMode === 'wireless');
+      document.getElementById('adb-wired').style.display = currentMode === 'wired' ? '' : 'none';
+      document.getElementById('adb-wireless').style.display = currentMode === 'wireless' ? '' : 'none';
+      if (currentMode === 'wired') {
+        if (retractEditor) retractEditor.layout();
+        if (expandEditor) expandEditor.layout();
+      } else {
+        startWirelessLive();
+      }
+    }
+    document.querySelectorAll('.adb-mode-btn').forEach(function(b) {
+      b.addEventListener('click', function() { setMode(b.getAttribute('data-mode')); });
+    });
+
+    // ---------- Load / save ----------
+    function initUI(settings) {
+      if (typeof monaco !== 'undefined') {
+        var rc = document.getElementById('adb-retractCommand-editor');
+        if (rc) retractEditor = monaco.editor.create(rc, Object.assign({}, monacoOptions, { value: settings.retractCommand || DEFAULT_RETRACT }));
+        var ec = document.getElementById('adb-expandCommand-editor');
+        if (ec) expandEditor = monaco.editor.create(ec, Object.assign({}, monacoOptions, { value: settings.expandCommand || DEFAULT_EXPAND }));
+        var themeObserver = new MutationObserver(function() { monaco.editor.setTheme(getMonacoTheme()); });
         themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
       }
-
-      // Load toggle values
       document.getElementById('adb-retractOnHome').checked = settings.retractOnHome !== undefined ? settings.retractOnHome : true;
       document.getElementById('adb-retractOnRapidMove').checked = settings.retractOnRapidMove !== undefined ? settings.retractOnRapidMove : true;
       document.getElementById('adb-showAddedGCode').checked = settings.showAddedGCode !== undefined ? settings.showAddedGCode : false;
+      setMode(settings.mode === 'wireless' ? 'wireless' : 'wired');
+    }
+
+    function init() {
+      fetch(BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings')
+        .then(function(r) { return r.ok ? r.json() : {}; })
+        .then(function(settings) { initUI(settings || {}); })
+        .catch(function() { initUI({}); });
     }
 
     function saveAndClose() {
-      var retractCommand = retractEditor ? retractEditor.getValue().trim() : '';
-      var expandCommand = expandEditor ? expandEditor.getValue().trim() : '';
-      var retractOnHome = document.getElementById('adb-retractOnHome').checked;
-      var retractOnRapidMove = document.getElementById('adb-retractOnRapidMove').checked;
-      var showAddedGCode = document.getElementById('adb-showAddedGCode').checked;
-
       var settings = {
-        retractCommand: retractCommand,
-        expandCommand: expandCommand,
-        retractOnHome: retractOnHome,
-        retractOnRapidMove: retractOnRapidMove,
-        showAddedGCode: showAddedGCode
+        mode: currentMode,
+        retractCommand: retractEditor ? retractEditor.getValue().trim() : DEFAULT_RETRACT,
+        expandCommand: expandEditor ? expandEditor.getValue().trim() : DEFAULT_EXPAND,
+        retractOnHome: document.getElementById('adb-retractOnHome').checked,
+        retractOnRapidMove: document.getElementById('adb-retractOnRapidMove').checked,
+        showAddedGCode: document.getElementById('adb-showAddedGCode').checked
       };
-
-      var settingsUrl = BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings';
-      fetch(settingsUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
+      fetch(BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
       })
-        .then(function() {
-          window.postMessage({ type: 'close-plugin-dialog' }, '*');
-        })
-        .catch(function(error) {
-          console.error('Failed to save settings:', error);
-        });
+        .then(function() { window.postMessage({ type: 'close-plugin-dialog' }, '*'); })
+        .catch(function(error) { console.error('Failed to save settings:', error); });
     }
 
     document.getElementById('adb-saveBtn').addEventListener('click', saveAndClose);
