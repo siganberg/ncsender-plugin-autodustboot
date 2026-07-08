@@ -66,6 +66,13 @@
   .adb-ctl:disabled { opacity: 0.45; cursor: not-allowed; }
   .adb-ctl.jog { padding: 14px 8px; font-size: 0.95rem; }
   .adb-hint { font-size: 0.72rem; color: var(--color-text-secondary, #888); font-weight: 400; }
+  .adb-pairrow { display: flex; gap: 16px; margin-top: 14px; }
+  .adb-linkbtn {
+    background: none; border: none; padding: 0; cursor: pointer;
+    font-size: 0.82rem; color: var(--color-accent, #4a90e2); text-decoration: underline;
+  }
+  .adb-linkbtn:disabled { color: var(--color-text-secondary, #888); cursor: default; text-decoration: none; }
+  .adb-linkbtn--danger { color: #dc2626; }
 
   .adb-button-row { display: flex; justify-content: center; gap: 10px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-border, #ddd); }
   .adb-btn { padding: 10px 24px; border-radius: 4px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: background-color 0.2s, border-color 0.2s; }
@@ -161,9 +168,14 @@
         <button type="button" class="adb-ctl" data-send="save" title="Save current position as the Expand target">Save</button>
       </div>
     </div>
-    <p class="adb-help-text" style="margin-top:14px">
+    <div class="adb-pairrow">
+      <button type="button" class="adb-linkbtn" id="adb-pairBtn" title="Open a 30s window so this board can bind to the dongle">Pair / add device</button>
+      <button type="button" class="adb-linkbtn adb-linkbtn--danger" id="adb-unpairBtn" title="Forget this device on the dongle">Unpair this device</button>
+    </div>
+    <p class="adb-help-text" style="margin-top:12px">
       Wireless mode controls the stepper directly and does <b>not</b> inject the pneumatic M8/M9 G-code.
-      If the board was never paired, open the dongle pairing window ($PAIR) so it can bind.
+      To bind a new/replacement board, hold RETRACT+EXTEND on it while powering on, then click
+      <b>Pair / add device</b> here.
     </p>
   </div>
 
@@ -465,6 +477,19 @@
         .then(function() { window.postMessage({ type: 'close-plugin-dialog' }, '*'); })
         .catch(function(error) { console.error('Failed to save settings:', error); });
     }
+
+    // Pairing actions (generic dongle API).
+    var pairBtn = document.getElementById('adb-pairBtn');
+    pairBtn.addEventListener('click', function() {
+      fetch(BASE_URL + '/api/dongle/pair', { method: 'POST' }).catch(function() {});
+      var orig = pairBtn.textContent;
+      pairBtn.textContent = 'Pairing window open (30s)…';
+      pairBtn.disabled = true;
+      setTimeout(function() { pairBtn.textContent = orig; pairBtn.disabled = false; }, 30000);
+    });
+    document.getElementById('adb-unpairBtn').addEventListener('click', function() {
+      fetch(BASE_URL + '/api/dongle/devices/' + DEVICE + '/unpair', { method: 'POST' }).catch(function() {});
+    });
 
     document.getElementById('adb-saveBtn').addEventListener('click', saveAndClose);
     init();
