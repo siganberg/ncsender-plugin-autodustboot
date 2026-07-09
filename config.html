@@ -138,7 +138,7 @@
   .adb-info.adb-info--open::before {
     opacity: 1;
   }
-  .adb-monaco-container { height: 360px; border: 1px solid var(--color-border, #ddd); border-radius: 4px; overflow: hidden; }
+  .adb-monaco-container { height: 460px; border: 1px solid var(--color-border, #ddd); border-radius: 4px; overflow: hidden; }
 
   /* Wireless panel */
   /* Big status card — mirrors PendantDialog: icon tile / big title + subtitle / right-side badge. */
@@ -570,7 +570,8 @@
     background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.18);
   }
   .adb-fw-body {
-    display: flex; align-items: center;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 6px;
     min-height: 44px;
     padding: 8px 14px;
   }
@@ -582,7 +583,6 @@
   .adb-fw-info-row {
     display: flex; align-items: center; justify-content: space-between;
     gap: 12px;
-    flex: 1;
   }
   .adb-fw-versions {
     display: flex; align-items: center; gap: 12px;
@@ -979,6 +979,7 @@
         : mm.toFixed(1) + ' mm';
     }
     function displayState() {
+      if (wl.state === 'homing') return 'Homing…';
       if (wl.state === 'moving') return 'Moving';
       var mm = countsToMm(wl.pos);
       if (mm != null && mm <= RETRACT_TOL_MM) return 'Retracted';
@@ -1025,7 +1026,10 @@
       document.getElementById('adb-vPos').textContent = fmtLength(wl.pos);
       document.getElementById('adb-vSaved').textContent = fmtLength(wl.saved);
       document.getElementById('adb-vHomed').textContent = wl.homed == null ? '--' : (wl.homed ? 'Yes' : 'No');
-      document.querySelectorAll('#adb-wireless .adb-ctl, #adb-wireless .adb-jog-arrow').forEach(function(b) { b.disabled = !wl.connected; });
+      // Lock every interactive control while homing — the ADB is blocking on
+      // homeStall() so sending a jog / retract / expand would just queue up.
+      var lock = !wl.connected || wl.state === 'homing';
+      document.querySelectorAll('#adb-wireless .adb-ctl, #adb-wireless .adb-jog-arrow').forEach(function(b) { b.disabled = lock; });
 
       // Pair button only when there's nothing paired.
       // Unpair whenever we have a paired entry (online or offline) — user can
@@ -1698,12 +1702,16 @@
       });
       window.ncSender.onServerEvent('plugin-ota:done', function(d) {
         if (!isOurs(d)) return;
-        fw.updating = false;
+        // Keep fw.updating true through the "rebooting" grace period so the
+        // action buttons stay hidden — the info-row and the progress-wrap
+        // are siblings in a flex-row body, and unhiding both at once makes
+        // them overlap horizontally.
         setFwProgress(100, 'Done. Board rebooting…');
         setFwStatus('ok', 'Firmware updated successfully. Board is rebooting.');
-        updateFwButtons();
         setTimeout(function() {
+          fw.updating = false;
           hideFwProgress();
+          updateFwButtons();
           checkFirmware();   // re-probe to confirm the new version
         }, 2500);
       });
