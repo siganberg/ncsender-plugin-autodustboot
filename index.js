@@ -40,7 +40,7 @@ export async function onLoad(ctx) {
     let html = readFileSync(join(__dirname, 'config.html'), 'utf-8');
     html = html.replace('__SERVER_PORT__', String(serverPort));
 
-    ctx.showDialog('AutoDustBoot Settings', html, { closable: true, width: '650px' });
+    ctx.showDialog('AutoDustBoot Settings', html, { closable: true, width: '640px' });
   }, { icon: 'icon.png' });
 }
 

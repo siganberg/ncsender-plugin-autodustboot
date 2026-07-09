@@ -1,10 +1,17 @@
 <style>
   .adb-dialog {
-    padding: 20px;
+    padding: 18px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     color: var(--color-text-primary, #333);
-    max-width: 600px;
+    width: 600px;
+    box-sizing: border-box;
+    overflow-x: hidden;
   }
+  .adb-dialog * { box-sizing: border-box; }
+  /* Fix the swappable mode section to a constant height so switching
+     Wired ↔ Wireless doesn't reflow the dialog. Height is tuned to the
+     taller Wireless layout (status card + jog + pair + firmware). */
+  #adb-wired, #adb-wireless { min-height: 480px; }
 
   /* Mode toggle (Wired <-> Wireless) */
   .adb-mode-row {
@@ -12,13 +19,16 @@
     align-items: center;
     justify-content: center;
     gap: 14px;
-    padding: 12px;
-    margin-bottom: 6px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
     border: 1px solid var(--color-border, #ddd);
     border-radius: 8px;
     background: var(--color-surface-muted, #f5f5f5);
   }
   .adb-mode-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-weight: 600;
     font-size: 0.95rem;
     color: var(--color-text-secondary, #888);
@@ -26,7 +36,6 @@
     user-select: none;
   }
   .adb-mode-label.active { color: var(--color-text-primary, #222); }
-  .adb-mode-help { text-align: center; margin-top: 0; margin-bottom: 20px; }
 
   .adb-form-row {
     display: grid;
@@ -35,46 +44,606 @@
     margin-bottom: 20px;
   }
   .adb-form-group { display: flex; flex-direction: column; }
-  .adb-form-group > label { margin-bottom: 8px; font-weight: 600; color: var(--color-text-primary, #333); }
-  .adb-toggle-switch { position: relative; width: 50px; height: 28px; margin-top: 8px; }
+  .adb-form-group > label { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 8px; font-weight: 600; color: var(--color-text-primary, #333); }
+  .adb-toggles-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    padding: 12px 0 4px;
+    margin-top: 14px;
+    border-top: 1px solid var(--color-border, #ddd);
+  }
+  .adb-toggle-item { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+  .adb-toggle-item > label:first-child { display: inline-flex; align-items: center; gap: 4px; font-size: 0.82rem; font-weight: 600; color: var(--color-text-primary, #333); }
+  .adb-toggle-item .adb-toggle-switch,
+  .adb-mode-row .adb-toggle-switch { margin-top: 0; }
+  .adb-toggle-switch { position: relative; width: 50px; height: 28px; margin-top: 8px; display: inline-block; vertical-align: middle; }
   .adb-toggle-switch input { opacity: 0; width: 0; height: 0; }
   .adb-toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 28px; }
   .adb-toggle-slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
   .adb-toggle-switch input:checked + .adb-toggle-slider { background-color: var(--color-accent, #4a90e2); }
   .adb-toggle-switch input:checked + .adb-toggle-slider:before { transform: translateX(22px); }
   .adb-help-text { font-size: 0.85rem; color: var(--color-text-secondary, #666); margin-top: 6px; line-height: 1.4; }
-  .adb-monaco-container { height: 80px; border: 1px solid var(--color-border, #ddd); border-radius: 4px; overflow: hidden; }
+
+  /* Progressive-disclosure info icon: small ⓘ next to a label. Hover on
+     desktop or tap on touch to reveal the explanation as a floating tip.
+     Uses CSS for hover/focus and a tiny JS toggle for tap. */
+  .adb-info {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px;
+    margin-left: 5px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+    background: transparent;
+    color: var(--color-text-secondary, #888);
+    font-size: 10px; font-weight: 700; line-height: 1;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-style: italic;
+    cursor: help;
+    position: relative;
+    vertical-align: middle;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .adb-info:hover,
+  .adb-info:focus-visible,
+  .adb-info.adb-info--open {
+    color: var(--color-accent, #4a90e2);
+    outline: none;
+  }
+  .adb-info::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1f2937;
+    color: #fff;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 400;
+    font-style: normal;
+    letter-spacing: 0;
+    white-space: normal;
+    width: max-content;
+    max-width: 260px;
+    line-height: 1.45;
+    text-align: left;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s;
+    z-index: 10;
+  }
+  .adb-info::before {
+    content: "";
+    position: absolute;
+    bottom: calc(100% + 3px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #1f2937;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s;
+    z-index: 11;
+  }
+  .adb-info:hover::after,
+  .adb-info:focus-visible::after,
+  .adb-info.adb-info--open::after,
+  .adb-info:hover::before,
+  .adb-info:focus-visible::before,
+  .adb-info.adb-info--open::before {
+    opacity: 1;
+  }
+  .adb-monaco-container { height: 360px; border: 1px solid var(--color-border, #ddd); border-radius: 4px; overflow: hidden; }
 
   /* Wireless panel */
-  .adb-status-card { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 8px; border: 1px solid var(--color-border, #ddd); background: var(--color-surface-muted, #f5f5f5); color: var(--color-text-secondary, #666); }
-  .adb-status-card.connected { border-color: #22c55e; background: rgba(34,197,94,0.08); color: var(--color-text-primary, #222); }
-  .adb-dot { width: 12px; height: 12px; border-radius: 50%; background: #9ca3af; flex: 0 0 auto; }
-  .adb-status-card.connected .adb-dot { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,0.18); }
-  .adb-status-title { font-weight: 600; font-size: 1rem; margin-bottom: 3px; color: var(--color-text-primary, #222); }
-  .adb-status-sub { font-size: 0.82rem; line-height: 1.35; color: var(--color-text-secondary, #666); }
-  .adb-details { margin-top: 14px; border: 1px solid var(--color-border, #ddd); border-radius: 8px; overflow: hidden; }
+  /* Big status card — mirrors PendantDialog: icon tile / big title + subtitle / right-side badge. */
+  .adb-status-card {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(135deg, rgba(100,100,100,0.10) 0%, rgba(80,80,80,0.05) 100%);
+    color: var(--color-text-primary, #222);
+  }
+  .adb-status-card.connected {
+    background: linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(34,197,94,0.05) 100%);
+    border-color: rgba(34,197,94,0.2);
+  }
+  .adb-status-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 52px; height: 52px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.05);
+    color: var(--color-text-secondary, #888);
+    flex-shrink: 0;
+  }
+  .adb-status-card.connected .adb-status-icon {
+    background: rgba(34,197,94,0.15);
+    color: #22c55e;
+  }
+  .adb-status-icon svg { width: 26px; height: 26px; }
+  .adb-status-body { flex: 1; min-width: 0; }
+  .adb-status-title { font-weight: 600; font-size: 1.05rem; color: var(--color-text-primary, #222); margin-bottom: 2px; }
+  .adb-status-card.connected .adb-status-title { color: #22c55e; }
+  .adb-status-sub { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--color-text-secondary, #666); }
+  .adb-meta-card {
+    display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 20px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.95rem;
+    color: var(--color-text-secondary, #94a3b8);
+    font-variant-numeric: tabular-nums;
+  }
+  .adb-meta-card b { color: var(--color-text-primary, #e5e7eb); font-weight: 500; }
+  .adb-meta-sep { display: none; }
+  .adb-status-right {
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
+  }
+  .adb-status-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 999px;
+    background: rgba(34,197,94,0.15); color: #22c55e;
+    font-size: 0.78rem; font-weight: 500;
+  }
+  .adb-status-badge .adb-pulse {
+    width: 7px; height: 7px; border-radius: 50%; background: #22c55e;
+    animation: adb-pulse 2s ease-in-out infinite;
+  }
+  @keyframes adb-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.9); } }
+  .adb-status-badge--muted { background: rgba(148,163,184,0.15); color: var(--color-text-secondary, #94a3b8); }
+  .adb-status-badge--muted .adb-pulse { background: #94a3b8; animation: none; }
+  /* Licensed pill for the title row (or corner of status card). */
+  .adb-licensed-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 10px;
+    background: rgba(251, 191, 36, 0.12);
+    color: #fbbf24;
+    font-size: 0.72rem; font-weight: 500;
+  }
+  .adb-details { margin-top: 10px; border: 1px solid var(--color-border, #ddd); border-radius: 8px; overflow: hidden; }
   .adb-row { display: flex; justify-content: space-between; padding: 9px 14px; font-size: 0.88rem; }
   .adb-row:not(:last-child) { border-bottom: 1px solid var(--color-border, #eee); }
   .adb-key { color: var(--color-text-secondary, #666); }
   .adb-val { font-variant-numeric: tabular-nums; color: var(--color-text-primary, #222); font-weight: 500; }
-  .adb-controls { margin-top: 16px; }
-  .adb-jog { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-  .adb-actionrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  .adb-ctl { padding: 10px 8px; border-radius: 6px; border: 1px solid var(--color-border, #ddd); background: var(--color-surface, #fff); color: var(--color-text-primary, #222); font-size: 0.88rem; font-weight: 500; cursor: pointer; user-select: none; }
-  .adb-ctl:hover:not(:disabled) { background: var(--color-surface-muted, #f0f0f0); }
-  .adb-ctl:active:not(:disabled) { background: var(--color-accent, #4a90e2); color: #fff; border-color: var(--color-accent, #4a90e2); }
-  .adb-ctl:disabled { opacity: 0.45; cursor: not-allowed; }
-  .adb-ctl.jog { padding: 14px 8px; font-size: 0.95rem; }
-  .adb-hint { font-size: 0.72rem; color: var(--color-text-secondary, #888); font-weight: 400; }
-  .adb-pairrow { display: flex; gap: 16px; margin-top: 14px; }
-  .adb-linkbtn {
-    background: none; border: none; padding: 0; cursor: pointer;
-    font-size: 0.82rem; color: var(--color-accent, #4a90e2); text-decoration: underline;
-  }
-  .adb-linkbtn:disabled { color: var(--color-text-secondary, #888); cursor: default; text-decoration: none; }
-  .adb-linkbtn--danger { color: #dc2626; }
 
-  .adb-button-row { display: flex; justify-content: center; gap: 10px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-border, #ddd); }
+  /* Control card — jog pill on the left, action grid on the right. Laid out
+     side-by-side so the whole cluster fits in one row instead of stacking. */
+  .adb-control-card {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 12px;
+    background: var(--color-surface, #fff);
+  }
+
+  /* --- Jog pill ---
+     Single rounded "remote"-style vertical control. Up arrow on top, Save
+     button in the middle, Down arrow at the bottom — mirrors the physical
+     UP / MODE / DOWN button layout on the AutoDustBoot itself.
+     Moderate radius (24 px) — capsule-ish but NOT half-circle. */
+  .adb-jog-pill {
+    display: grid;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 1px;
+    border-radius: 16px;
+    background: var(--color-border, #ddd);
+    height: 168px;
+    overflow: hidden;
+  }
+  .adb-jog-arrow {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--color-surface-muted, #fafafa);
+    border: 0 !important;
+    border-radius: 0 !important;
+    color: var(--color-text-primary, #222);
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s, color 0.12s;
+    padding: 0;
+    margin: 0 !important;
+  }
+  .adb-jog-arrow svg { width: 24px; height: 24px; }
+  .adb-jog-arrow--up { border-radius: 16px 16px 0 0 !important; }
+  .adb-jog-arrow--down { border-radius: 0 0 16px 16px !important; }
+  .adb-jog-arrow:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent, #4a90e2) 8%, transparent); }
+  /* Long-press / active state — the arrow lights up in accent while held. */
+  .adb-jog-arrow.pressed,
+  .adb-jog-arrow:active:not(:disabled) {
+    background: var(--color-accent, #4a90e2);
+    color: #fff;
+  }
+  .adb-jog-arrow:disabled,
+  .adb-jog-arrow:disabled:hover,
+  .adb-jog-arrow:disabled:active {
+    opacity: 0.35; cursor: not-allowed;
+    pointer-events: none;
+    background: var(--color-surface-muted, #fafafa) !important;
+    color: var(--color-text-primary, #222) !important;
+    transform: none !important;
+  }
+  .adb-jog-center {
+    display: flex; flex-direction: row; align-items: center; justify-content: center;
+    gap: 6px;
+    padding: 0;
+    background: var(--color-surface-muted, #fafafa);
+    border: 0 !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    color: var(--color-text-primary, #222);
+    font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, color 0.12s;
+  }
+  .adb-jog-center svg { width: 14px; height: 14px; opacity: 0.85; }
+  .adb-jog-center:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent, #4a90e2) 8%, transparent); }
+  .adb-jog-center:active:not(:disabled) { background: var(--color-accent, #4a90e2); color: #fff; }
+  .adb-jog-center:disabled,
+  .adb-jog-center:disabled:hover,
+  .adb-jog-center:disabled:active {
+    opacity: 0.4; cursor: not-allowed;
+    pointer-events: none;
+    background: var(--color-surface-muted, #fafafa) !important;
+    color: var(--color-text-primary, #222) !important;
+    transform: none !important;
+  }
+
+  /* --- Action grid ---
+     Retract / Expand / Home as three equal-width tiles matching the jog pill height. */
+  .adb-action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    height: 168px;
+  }
+  .adb-action-btn {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px;
+    height: 100%;
+    padding: 8px 4px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 10px;
+    background: var(--color-surface-muted, #fafafa);
+    color: var(--color-text-primary, #222);
+    font-size: 0.82rem; font-weight: 500;
+    cursor: pointer; user-select: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+  }
+  .adb-action-btn svg { width: 24px; height: 24px; opacity: 0.85; }
+  .adb-action-btn:hover:not(:disabled) {
+    background: var(--color-accent, #4a90e2) !important;
+    border-color: var(--color-accent, #4a90e2) !important;
+    color: #fff !important;
+  }
+  .adb-action-btn:hover:not(:disabled) svg { opacity: 1; color: #fff; }
+  .adb-action-btn:active:not(:disabled) {
+    background: var(--color-accent-hover, #3a7bc8) !important;
+    color: #fff !important;
+    border-color: var(--color-accent, #4a90e2) !important;
+    transform: translateY(1px);
+  }
+  .adb-action-btn:active:not(:disabled) svg { opacity: 1; color: #fff; }
+  .adb-action-btn:disabled,
+  .adb-action-btn:disabled:hover,
+  .adb-action-btn:disabled:active {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+    background: var(--color-surface-muted, #fafafa) !important;
+    border-color: var(--color-border, #ddd) !important;
+    color: var(--color-text-primary, #222) !important;
+    transform: none !important;
+  }
+  .adb-action-btn:disabled svg,
+  .adb-action-btn:disabled:hover svg { opacity: 0.85; color: inherit !important; }
+
+  /* Pair / Unpair — compact button inside the status card's right column. */
+  .adb-pair-btn, .adb-unpair-btn {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.82rem; font-weight: 500;
+    cursor: pointer;
+    transition: filter 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .adb-pair-btn {
+    background: var(--color-accent, #4a90e2);
+    border: 1px solid var(--color-accent, #4a90e2);
+    color: #fff;
+  }
+  .adb-pair-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .adb-pair-btn:disabled { opacity: 0.6; cursor: default; }
+  .adb-unpair-btn {
+    background: #ef4444 !important;
+    border: 1px solid #ef4444 !important;
+    color: #fff !important;
+  }
+  .adb-unpair-btn:hover:not(:disabled) { filter: brightness(1.08); background: #dc2626 !important; }
+  .adb-unpair-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Inline unpair-confirm modal — fixed to viewport so it centers
+     regardless of scroll position inside the plugin dialog. */
+  /* ncSender-style confirm dialog — mirrors ConfirmPanel.vue so the plugin's
+     unpair confirm has the same look as PendantDialog's "Unpair Dongle". */
+  .adb-confirm-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10000;
+  }
+  .adb-confirm-panel {
+    display: flex; flex-direction: column; gap: 16px;
+    max-width: 480px; width: calc(100% - 40px);
+    background: var(--color-surface, #1a1d24);
+    border: 1px solid var(--color-border, rgba(255,255,255,0.08));
+    border-radius: 16px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    padding: 28px 32px;
+  }
+  .adb-confirm-title {
+    margin: 0;
+    font-size: 1.25rem; font-weight: 600;
+    color: var(--color-text-primary, #e5e7eb);
+  }
+  .adb-confirm-body {
+    margin: 0;
+    font-size: 0.95rem; line-height: 1.5;
+    color: var(--color-text-secondary, #94a3b8);
+  }
+  .adb-confirm-actions {
+    display: flex; justify-content: center; gap: 12px; margin-top: 6px;
+  }
+  .adb-confirm-btn {
+    padding: 10px 24px;
+    border-radius: 6px;
+    font-size: 0.95rem; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+  }
+  .adb-confirm-btn--cancel {
+    background: var(--color-surface-muted, #262a33) !important;
+    color: var(--color-text-primary, #e5e7eb) !important;
+    border: 1px solid var(--color-border, rgba(255,255,255,0.08)) !important;
+  }
+  .adb-confirm-btn--cancel:hover {
+    background: var(--color-surface, #1a1d24) !important;
+    border-color: var(--color-accent, #4a90e2) !important;
+  }
+  .adb-confirm-btn--danger {
+    background: linear-gradient(135deg, #ff6b6b, rgba(255, 107, 107, 0.8)) !important;
+    color: #fff !important;
+  }
+  .adb-confirm-btn--danger:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(255, 107, 107, 0.3);
+  }
+
+  /* Activation card — shown when the AutoDustBoot has no valid license */
+  .adb-activate-card {
+    margin-top: 14px;
+    border: 1px solid #f59e0b;
+    border-left: 4px solid #f59e0b;
+    border-radius: 10px;
+    background: color-mix(in srgb, #f59e0b 6%, transparent);
+    padding: 16px;
+  }
+  .adb-activate-title {
+    font-weight: 600; font-size: 0.95rem;
+    color: var(--color-text-primary, #222);
+    margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .adb-activate-body {
+    font-size: 0.85rem; line-height: 1.5;
+    color: var(--color-text-secondary, #666);
+    margin-bottom: 12px;
+  }
+  .adb-activate-idlabel {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--color-text-secondary, #888);
+    margin-bottom: 4px;
+  }
+  .adb-activate-id {
+    display: block; padding: 8px 10px; margin-bottom: 12px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 6px;
+    background: var(--color-surface, #fff);
+    color: var(--color-text-primary, #222);
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    word-break: break-all;   /* wrap the 64-hex hash cleanly at any char */
+    user-select: all;
+  }
+  .adb-activate-input {
+    width: 100%;
+    padding: 9px 12px; margin-bottom: 10px;
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 6px;
+    background: var(--color-surface, #fff);
+    color: var(--color-text-primary, #222);
+    font-size: 0.9rem;
+    box-sizing: border-box;
+  }
+  .adb-activate-input:focus { outline: none; border-color: var(--color-accent, #4a90e2); }
+  .adb-activate-actions { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+  .adb-activate-btn {
+    background: var(--color-accent, #4a90e2);
+    border: 1px solid var(--color-accent, #4a90e2);
+    color: #fff;
+    padding: 9px 18px; border-radius: 8px;
+    font-size: 0.9rem; font-weight: 500;
+    cursor: pointer;
+  }
+  .adb-activate-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .adb-activate-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .adb-activate-remove {
+    background: none; border: none; padding: 0;
+    color: var(--color-text-secondary, #888);
+    font-size: 0.75rem; text-decoration: underline; cursor: pointer;
+  }
+  .adb-activate-remove:hover { color: #ef4444; }
+  .adb-activate-status {
+    margin-top: 10px; font-size: 0.82rem;
+    color: var(--color-text-secondary, #666);
+    min-height: 1em;
+  }
+  .adb-activate-status--err { color: #ef4444; }
+  .adb-activate-status--ok  { color: #22c55e; }
+
+  /* Firmware Update card — mirrors PendantDialog's OTA card */
+  .adb-fw-card {
+    margin-top: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    background: rgba(255,255,255,0.02);
+    overflow: hidden;
+  }
+  .adb-fw-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.95rem; font-weight: 500;
+    color: var(--color-text-primary, #222);
+  }
+  .adb-fw-header > svg { color: var(--color-text-secondary, #888); }
+  .adb-fw-header-title { font-weight: 500; font-size: 0.95rem; flex: 1; color: var(--color-text-primary, #222); }
+  .adb-fw-refresh {
+    margin-left: auto;
+    background: none; border: none;
+    color: var(--color-text-secondary, #888);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex; align-items: center;
+    transition: all 0.2s ease;
+  }
+  .adb-fw-refresh:hover:not(:disabled) { background: rgba(255,255,255,0.08); color: var(--color-text-primary, #222); }
+  .adb-fw-refresh:disabled { opacity: 0.4; cursor: not-allowed; }
+  .adb-fw-refresh.spinning svg { animation: adb-spin 1s linear infinite; }
+  @keyframes adb-spin { to { transform: rotate(360deg); } }
+
+  /* Compact "License: Activated / Not activated" badge in the card header.
+     Dot color + label change with state. Always visible. */
+  .adb-fw-license {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 999px;
+    font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.02em;
+    background: color-mix(in srgb, #9ca3af 15%, transparent);
+    color: var(--color-text-secondary, #888);
+  }
+  .adb-fw-license-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #9ca3af;
+    flex: 0 0 auto;
+  }
+  .adb-fw-license--ok {
+    background: color-mix(in srgb, #22c55e 15%, transparent);
+    color: #22c55e;
+  }
+  .adb-fw-license--ok .adb-fw-license-dot {
+    background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.18);
+  }
+  .adb-fw-license--warn {
+    background: color-mix(in srgb, #f59e0b 15%, transparent);
+    color: #f59e0b;
+  }
+  .adb-fw-license--warn .adb-fw-license-dot {
+    background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.18);
+  }
+  .adb-fw-body {
+    display: flex; align-items: center;
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+  .adb-fw-status { display: flex; align-items: center; gap: 10px; font-size: 0.95rem; color: var(--color-text-primary, #222); }
+  .adb-fw-status--muted { color: var(--color-text-secondary, #666); }
+  .adb-fw-status--ok { color: #22c55e; }
+  .adb-fw-status--warn { color: #f59e0b; }
+  .adb-fw-status--err { color: #ef4444; }
+  .adb-fw-info-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    flex: 1;
+  }
+  .adb-fw-versions {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 0.85rem; color: var(--color-text-secondary, #666);
+  }
+  .adb-fw-version-chip {
+    padding: 2px 8px; border-radius: 4px;
+    background: var(--color-surface-muted, #f0f0f0);
+    font-variant-numeric: tabular-nums; font-weight: 500;
+    color: var(--color-text-primary, #222);
+  }
+  .adb-fw-actions { display: flex; gap: 8px; flex-wrap: nowrap; }
+  .adb-fw-action-btn {
+    padding: 5px 12px; border-radius: 6px;
+    font-size: 0.8rem; font-weight: 500;
+    cursor: pointer; transition: filter 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .adb-fw-action-btn--primary {
+    background: var(--color-accent, #4a90e2);
+    border: 1px solid var(--color-accent, #4a90e2);
+    color: #fff;
+  }
+  .adb-fw-action-btn--primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .adb-fw-action-btn--secondary {
+    background: var(--color-accent, #4a90e2) !important;
+    border: 1px solid var(--color-accent, #4a90e2) !important;
+    color: #fff !important;
+  }
+  .adb-fw-action-btn--secondary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    background: var(--color-accent-hover, #3a7bc8) !important;
+  }
+  .adb-fw-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .adb-fw-progress {
+    margin-top: 12px;
+    height: 6px; border-radius: 3px;
+    background: var(--color-surface-muted, #f0f0f0);
+    overflow: hidden;
+  }
+  .adb-fw-progress-bar {
+    height: 100%; width: 0%;
+    background: var(--color-accent, #4a90e2);
+    transition: width 0.25s ease;
+  }
+  .adb-fw-progress-label {
+    display: flex; justify-content: space-between;
+    margin-top: 6px; font-size: 0.78rem;
+    color: var(--color-text-secondary, #666);
+  }
+  .adb-fw-spin {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(128,128,128,0.25);
+    border-top-color: var(--color-accent, #4a90e2);
+    border-radius: 50%;
+    animation: adb-fw-spin 0.9s linear infinite;
+    flex: 0 0 auto;
+  }
+  @keyframes adb-fw-spin { to { transform: rotate(360deg); } }
+
+  .adb-button-row { display: flex; justify-content: center; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--color-border, #ddd); }
   .adb-btn { padding: 10px 24px; border-radius: 4px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: background-color 0.2s, border-color 0.2s; }
   .adb-btn-secondary { background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd); color: var(--color-text-primary, #333); }
   .adb-btn-secondary:hover { background: var(--color-surface-muted, #f5f5f5); }
@@ -84,99 +653,213 @@
 <div class="adb-dialog">
   <!-- Control-method toggle: unchecked = Wired, checked = Wireless -->
   <div class="adb-mode-row">
-    <span class="adb-mode-label" id="adb-label-wired">Wired</span>
+    <span class="adb-mode-label" id="adb-label-wired">Wired<span role="button" tabindex="0" class="adb-info" data-tip="Wired mode: NcSender drives the dust boot directly through the sender's Z-axis output relay." aria-label="Wired mode info">i</span></span>
     <label class="adb-toggle-switch">
       <input type="checkbox" id="adb-modeToggle">
       <span class="adb-toggle-slider"></span>
     </label>
-    <span class="adb-mode-label" id="adb-label-wireless">Wireless</span>
+    <span class="adb-mode-label" id="adb-label-wireless">Wireless<span role="button" tabindex="0" class="adb-info" data-tip="Wireless mode: the AutoDustBoot controller drives its own stepper. NcSender sends commands over ESP-NOW through the paired adapter." aria-label="Wireless mode info">i</span></span>
   </div>
-  <p class="adb-help-text adb-mode-help" id="adb-mode-help"></p>
 
   <!-- ==== WIRED (pneumatic) ==== -->
   <div id="adb-wired">
     <div class="adb-form-row">
       <div class="adb-form-group">
-        <label>Retract Sequence</label>
+        <label>Retract Sequence<span role="button" tabindex="0" class="adb-info" data-tip="G-code sequence to retract the dust boot." aria-label="Retract sequence info">i</span></label>
         <div class="adb-monaco-container" id="adb-retractCommand-editor"></div>
-        <p class="adb-help-text">G-code sequence to retract the dust boot</p>
       </div>
       <div class="adb-form-group">
-        <label>Expand Sequence</label>
+        <label>Expand Sequence<span role="button" tabindex="0" class="adb-info" data-tip="G-code sequence to expand the dust boot." aria-label="Expand sequence info">i</span></label>
         <div class="adb-monaco-container" id="adb-expandCommand-editor"></div>
-        <p class="adb-help-text">G-code sequence to expand the dust boot</p>
-      </div>
-    </div>
-
-    <div class="adb-form-row">
-      <div class="adb-form-group">
-        <label>Retract on Home</label>
-        <label class="adb-toggle-switch">
-          <input type="checkbox" id="adb-retractOnHome" checked>
-          <span class="adb-toggle-slider"></span>
-        </label>
-        <p class="adb-help-text">Automatically retract when homing ($H)</p>
-      </div>
-      <div class="adb-form-group">
-        <label>Retract on Rapid Move (G0)</label>
-        <label class="adb-toggle-switch">
-          <input type="checkbox" id="adb-retractOnRapidMove" checked>
-          <span class="adb-toggle-slider"></span>
-        </label>
-        <p class="adb-help-text">Retract during rapid moves (except when running jobs)</p>
-      </div>
-    </div>
-
-    <div class="adb-form-row">
-      <div class="adb-form-group">
-        <label>Show Added GCode in Terminal</label>
-        <label class="adb-toggle-switch">
-          <input type="checkbox" id="adb-showAddedGCode">
-          <span class="adb-toggle-slider"></span>
-        </label>
-        <p class="adb-help-text">When disabled, commands are executed silently</p>
       </div>
     </div>
   </div>
 
-  <!-- ==== WIRELESS (ESP-NOW stepper) ==== -->
+  <!-- ==== WIRELESS (stepper board via dongle) ==== -->
   <div id="adb-wireless" style="display:none">
     <div id="adb-statusCard" class="adb-status-card">
-      <span class="adb-dot"></span>
-      <div>
+      <div class="adb-status-icon">
+        <!-- Wireless — three arcs radiating from a dot. -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 8.5a15 15 0 0 1 20 0"/>
+          <path d="M5 12a10 10 0 0 1 14 0"/>
+          <path d="M8.5 15.5a5 5 0 0 1 7 0"/>
+          <circle cx="12" cy="19" r="1.2" fill="currentColor"/>
+        </svg>
+      </div>
+      <div class="adb-status-body">
         <div id="adb-statusTitle" class="adb-status-title">Checking…</div>
-        <div id="adb-statusSub" class="adb-status-sub">Contacting the AutoDustBoot through the dongle…</div>
+        <div id="adb-statusSub" class="adb-status-sub">Contacting the AutoDustBoot through the adapter…</div>
+      </div>
+      <div class="adb-status-right">
+        <button type="button" id="adb-pairBtn" class="adb-pair-btn" style="display:none">Pair New Device</button>
+        <button type="button" id="adb-unpairBtn" class="adb-unpair-btn" style="display:none">Unpair Device</button>
       </div>
     </div>
 
-    <div id="adb-wl-details" class="adb-details" style="display:none">
-      <div class="adb-row"><span class="adb-key">State</span><span class="adb-val" id="adb-vState">—</span></div>
-      <div class="adb-row"><span class="adb-key">Position</span><span class="adb-val" id="adb-vPos">—</span></div>
-      <div class="adb-row"><span class="adb-key">Saved</span><span class="adb-val" id="adb-vSaved">—</span></div>
-      <div class="adb-row"><span class="adb-key">Homed</span><span class="adb-val" id="adb-vHomed">—</span></div>
+    <!-- Activation card — shown when the plugin has confirmed the board is
+         unlicensed. Blocks the jog / action buttons from doing anything
+         until activation completes. -->
+    <div id="adb-activate-card" class="adb-activate-card" style="display:none">
+      <div class="adb-activate-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        AutoDustBoot not activated
+      </div>
+      <div class="adb-activate-body">
+        This board is unlicensed — the motor is disabled and both status LEDs blink together until it's activated. Enter your ncSender installation ID and click Activate.
+      </div>
+      <div class="adb-activate-idlabel">Device ID</div>
+      <code class="adb-activate-id" id="adb-activate-id">—</code>
+      <input type="text" class="adb-activate-input" id="adb-activate-installation" placeholder="Installation ID" autocomplete="off" spellcheck="false">
+      <div class="adb-activate-actions">
+        <button type="button" class="adb-activate-btn" id="adb-activate-btn">Activate</button>
+      </div>
+      <div class="adb-activate-status" id="adb-activate-status"></div>
     </div>
 
-    <div class="adb-controls">
-      <div class="adb-jog">
-        <button type="button" class="adb-ctl jog" data-jog="up">▲ Up <span class="adb-hint">(hold)</span></button>
-        <button type="button" class="adb-ctl jog" data-jog="down">▼ Down <span class="adb-hint">(hold)</span></button>
+    <!-- Jog pill (left) + Action grid (right) — horizontal layout keeps
+         the whole control cluster in one screen without vertical scroll. -->
+    <div class="adb-control-card">
+      <div class="adb-jog-pill" title="Hold to jog. Tap Save to store the current position.">
+        <button type="button" class="adb-jog-arrow adb-jog-arrow--up" data-jog="up" aria-label="Jog up (hold)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg>
+        </button>
+        <button type="button" class="adb-jog-center adb-ctl" data-send="save" title="Save current position as the Expand target">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          <span>SAVE</span>
+        </button>
+        <button type="button" class="adb-jog-arrow adb-jog-arrow--down" data-jog="down" aria-label="Jog down (hold)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
       </div>
-      <div class="adb-actionrow">
-        <button type="button" class="adb-ctl" data-send="goto:0">Retract</button>
-        <button type="button" class="adb-ctl" id="adb-btnExpand">Expand</button>
-        <button type="button" class="adb-ctl" data-send="home">Home</button>
-        <button type="button" class="adb-ctl" data-send="save" title="Save current position as the Expand target">Save</button>
+      <div class="adb-action-grid">
+        <button type="button" class="adb-action-btn adb-ctl" data-send="goto:0" title="Return to home (retract)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 14 4 20 10 20"/>
+            <polyline points="20 10 20 4 14 4"/>
+            <line x1="14" y1="10" x2="21" y2="3"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+          <span>Retract</span>
+        </button>
+        <button type="button" class="adb-action-btn adb-ctl" id="adb-btnExpand" title="Move to the saved expand position">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/>
+            <polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+          <span>Expand</span>
+        </button>
+        <button type="button" class="adb-action-btn adb-ctl" data-send="home" title="Home to the hard stop">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12L12 3l9 9"/>
+            <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"/>
+          </svg>
+          <span>Home</span>
+        </button>
       </div>
     </div>
-    <div class="adb-pairrow">
-      <button type="button" class="adb-linkbtn" id="adb-pairBtn" title="Open a 30s window so this board can bind to the dongle">Pair / add device</button>
-      <button type="button" class="adb-linkbtn adb-linkbtn--danger" id="adb-unpairBtn" title="Forget this device on the dongle">Unpair this device</button>
+
+    <!-- One-liner meta panel below the jog + action cluster: appears only when linked. -->
+    <div id="adb-statusMeta" class="adb-meta-card">
+      <span class="adb-meta-item">State: <b id="adb-vState">--</b></span>
+      <span class="adb-meta-sep">·</span>
+      <span class="adb-meta-item">Pos: <b id="adb-vPos">--</b></span>
+      <span class="adb-meta-sep">·</span>
+      <span class="adb-meta-item">Saved: <b id="adb-vSaved">--</b></span>
+      <span class="adb-meta-sep">·</span>
+      <span class="adb-meta-item">Homed: <b id="adb-vHomed">--</b></span>
     </div>
-    <p class="adb-help-text" style="margin-top:12px">
-      Wireless mode controls the stepper directly and does <b>not</b> inject the pneumatic M8/M9 G-code.
-      To bind a new/replacement board, hold RETRACT+EXTEND on it while powering on, then click
-      <b>Pair / add device</b> here.
-    </p>
+
+    <!-- Firmware Update — talks directly to the AutoDustBoot over USB.
+         The board normally runs off ESP-NOW via the dongle, so its USB
+         port is idle and free to open for OTA. Plug the board into USB
+         when you want to update it. -->
+    <div class="adb-fw-card">
+      <div class="adb-fw-header">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span class="adb-fw-header-title">Firmware Update</span>
+        <span class="adb-fw-license" id="adb-fw-license" title="License status">
+          <span class="adb-fw-license-dot"></span>
+          <span class="adb-fw-license-label">Checking…</span>
+        </span>
+      </div>
+      <div class="adb-fw-body">
+        <div class="adb-fw-info-row">
+          <div id="adb-fw-status" class="adb-fw-status adb-fw-status--muted">
+            <span>Plug in via USB to check for updates.</span>
+          </div>
+          <div id="adb-fw-actions" class="adb-fw-actions" style="display:none">
+            <button type="button" id="adb-fw-update" class="adb-fw-action-btn adb-fw-action-btn--primary" style="display:none">Update Firmware</button>
+            <button type="button" id="adb-fw-flash-file" class="adb-fw-action-btn adb-fw-action-btn--secondary">Flash from file…</button>
+            <input type="file" id="adb-fw-file-input" accept=".bin" style="display:none">
+          </div>
+        </div>
+        <div id="adb-fw-progress-wrap" style="display:none">
+          <div class="adb-fw-progress">
+            <div id="adb-fw-progress-bar" class="adb-fw-progress-bar"></div>
+          </div>
+          <div class="adb-fw-progress-label">
+            <span id="adb-fw-progress-msg">Starting…</span>
+            <span id="adb-fw-progress-pct">0%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unpair confirmation — mirrors PendantDialog's ConfirmPanel styling. -->
+    <div id="adb-unpair-confirm" class="adb-confirm-backdrop" style="display:none">
+      <div class="adb-confirm-panel">
+        <h3 class="adb-confirm-title">Unpair Device</h3>
+        <p class="adb-confirm-body">
+          Are you sure you want to unpair this AutoDustBoot? You will need to re-pair it before it can receive wireless commands again.
+        </p>
+        <div class="adb-confirm-actions">
+          <button type="button" class="adb-confirm-btn adb-confirm-btn--cancel" id="adb-unpair-cancel">Cancel</button>
+          <button type="button" class="adb-confirm-btn adb-confirm-btn--danger" id="adb-unpair-confirm-btn">Unpair</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==== COMMON (applies to both Wired + Wireless) ====
+       These behavioral toggles hook into how the plugin's command processor
+       injects retracts around homing / rapid moves and how much noise it
+       adds to the terminal, so they're meaningful regardless of whether the
+       actual dust-boot motion is pneumatic (Wired) or wireless. -->
+  <div class="adb-toggles-row">
+    <div class="adb-toggle-item">
+      <label>Retract on Home<span role="button" tabindex="0" class="adb-info" data-tip="Automatically retract when homing ($H)." aria-label="Retract on home info">i</span></label>
+      <label class="adb-toggle-switch">
+        <input type="checkbox" id="adb-retractOnHome" checked>
+        <span class="adb-toggle-slider"></span>
+      </label>
+    </div>
+    <div class="adb-toggle-item">
+      <label>Retract on Rapid (G0)<span role="button" tabindex="0" class="adb-info" data-tip="Retract during rapid moves. Skipped while a job is running." aria-label="Retract on rapid move info">i</span></label>
+      <label class="adb-toggle-switch">
+        <input type="checkbox" id="adb-retractOnRapidMove" checked>
+        <span class="adb-toggle-slider"></span>
+      </label>
+    </div>
+    <div class="adb-toggle-item">
+      <label>Echo in Terminal<span role="button" tabindex="0" class="adb-info" data-tip="When enabled, injected G-code commands are echoed in the terminal so you can see what the plugin sent." aria-label="Echo G-code info">i</span></label>
+      <label class="adb-toggle-switch">
+        <input type="checkbox" id="adb-showAddedGCode">
+        <span class="adb-toggle-slider"></span>
+      </label>
+    </div>
   </div>
 
   <div class="adb-button-row">
@@ -274,7 +957,10 @@
     var monacoOptions = { language: 'gcode', theme: getMonacoTheme(), minimap: { enabled: false }, lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true, fontSize: 12, tabSize: 2 };
 
     // ---------- Wireless status/controls ----------
-    var wl = { connected: false, pos: null, saved: null, state: null, homed: null, lastSeenMs: -1, units: 'metric' };
+    // known = the dongle has ever heard from this device (i.e. it's paired,
+    // even if currently offline). Lets us distinguish "never paired" from
+    // "paired but powered off" — the UI needs different affordances for each.
+    var wl = { known: false, connected: false, pos: null, saved: null, state: null, homed: null, lastSeenMs: -1, units: 'metric' };
 
     // counts -> mm, clamped to the physical travel (also smooths the small negative drift
     // the encoder can report just past home, e.g. -21 counts -> 0).
@@ -287,7 +973,7 @@
     }
     function fmtLength(counts) {
       var mm = countsToMm(counts);
-      if (mm == null) return '—';
+      if (mm == null) return '--';
       return wl.units === 'imperial'
         ? (mm / 25.4).toFixed(3) + ' in'
         : mm.toFixed(1) + ' mm';
@@ -297,7 +983,7 @@
       var mm = countsToMm(wl.pos);
       if (mm != null && mm <= RETRACT_TOL_MM) return 'Retracted';
       if (wl.state === 'expanded') return 'Expanded';
-      return mm != null ? 'Positioned' : '—';
+      return mm != null ? 'Positioned' : '--';
     }
 
     function parsePayload(payload) {
@@ -316,16 +1002,36 @@
     function renderWireless() {
       var card = document.getElementById('adb-statusCard');
       card.classList.toggle('connected', !!wl.connected);
-      document.getElementById('adb-statusTitle').textContent = wl.connected ? 'Paired & Connected' : 'Not detected';
-      document.getElementById('adb-statusSub').textContent = wl.connected
-        ? ('Linked through the dongle' + (wl.lastSeenMs >= 0 ? ' · last seen ' + wl.lastSeenMs + ' ms ago' : ''))
-        : 'Not receiving data. Power on the AutoDustBoot and pair it through the dongle ($PAIR).';
-      document.getElementById('adb-wl-details').style.display = wl.connected ? '' : 'none';
+
+      // Three states:
+      //   Connected           — paired + link alive        → title "Connected",  Unpair button
+      //   Paired, offline     — paired but powered off     → title "Not connected", Unpair button
+      //   Not paired          — no entry on the dongle     → title "Not paired",    Pair button
+      var title, sub;
+      if (wl.connected) {
+        title = 'Connected';
+        sub = 'via Wireless adapter' + (wl.lastSeenMs >= 0 ? ' · last seen ' + wl.lastSeenMs + ' ms ago' : '');
+      } else if (wl.known) {
+        title = 'Not connected';
+        sub = 'Paired but currently offline — power on the AutoDustBoot to reconnect.';
+      } else {
+        title = 'Not paired';
+        sub = 'Power on the AutoDustBoot, then click Pair New Device.';
+      }
+      document.getElementById('adb-statusTitle').textContent = title;
+      document.getElementById('adb-statusSub').textContent = sub;
+
       document.getElementById('adb-vState').textContent = displayState();
       document.getElementById('adb-vPos').textContent = fmtLength(wl.pos);
       document.getElementById('adb-vSaved').textContent = fmtLength(wl.saved);
-      document.getElementById('adb-vHomed').textContent = wl.homed == null ? '—' : (wl.homed ? 'Yes' : 'No');
-      document.querySelectorAll('#adb-wireless .adb-ctl').forEach(function(b) { b.disabled = !wl.connected; });
+      document.getElementById('adb-vHomed').textContent = wl.homed == null ? '--' : (wl.homed ? 'Yes' : 'No');
+      document.querySelectorAll('#adb-wireless .adb-ctl, #adb-wireless .adb-jog-arrow').forEach(function(b) { b.disabled = !wl.connected; });
+
+      // Pair button only when there's nothing paired.
+      // Unpair whenever we have a paired entry (online or offline) — user can
+      // still forget an offline device.
+      document.getElementById('adb-pairBtn').style.display   = wl.known ? 'none' : '';
+      document.getElementById('adb-unpairBtn').style.display = wl.known ? '' : 'none';
     }
 
     function send(payload) {
@@ -339,7 +1045,15 @@
       return fetch(BASE_URL + '/api/dongle/devices/' + DEVICE)
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(d) {
-          if (!d) { renderWireless(); return; }
+          if (!d) {
+            // No entry in the dongle's device table — treated as "never paired".
+            wl.known = false;
+            wl.connected = false;
+            wl.lastSeenMs = -1;
+            renderWireless();
+            return;
+          }
+          wl.known = true;
           wl.connected = !!d.connected;
           wl.lastSeenMs = typeof d.lastSeenMs === 'number' ? d.lastSeenMs : -1;
           parsePayload(d.lastMessage);
@@ -358,13 +1072,25 @@
     var jogTimer = null;
     function startJog(dir) { send(dir); if (jogTimer) clearInterval(jogTimer); jogTimer = setInterval(function() { send(dir); }, 300); }
     function stopJog() { if (!jogTimer) return; clearInterval(jogTimer); jogTimer = null; send('stop'); }
+    // Add a persistent `.pressed` class on the button while a jog is
+    // active — the CSS lights the arrow in accent color for hold feedback.
+    // Using an explicit class instead of relying on :active means the state
+    // stays even after the mouseup, until we call clearJogPress().
+    function clearJogPress() {
+      document.querySelectorAll('#adb-wireless [data-jog]').forEach(function(b) {
+        b.classList.remove('pressed');
+      });
+    }
     document.querySelectorAll('#adb-wireless [data-jog]').forEach(function(b) {
       var dir = b.getAttribute('data-jog');
-      b.addEventListener('mousedown', function() { startJog(dir); });
-      b.addEventListener('mouseup', stopJog);
-      b.addEventListener('mouseleave', stopJog);
-      b.addEventListener('touchstart', function(e) { e.preventDefault(); startJog(dir); }, { passive: false });
-      b.addEventListener('touchend', function(e) { e.preventDefault(); stopJog(); }, { passive: false });
+      var press = function() { b.classList.add('pressed'); startJog(dir); };
+      var release = function() { b.classList.remove('pressed'); stopJog(); };
+      b.addEventListener('mousedown', press);
+      b.addEventListener('mouseup', release);
+      b.addEventListener('mouseleave', release);
+      b.addEventListener('touchstart', function(e) { e.preventDefault(); press(); }, { passive: false });
+      b.addEventListener('touchend',   function(e) { e.preventDefault(); release(); }, { passive: false });
+      b.addEventListener('touchcancel', release);
     });
 
     // Live updates (additive bridge; REST-poll fallback on older apps)
@@ -374,11 +1100,20 @@
       if (window.ncSender && typeof window.ncSender.onServerEvent === 'function') {
         if (!offMsg) offMsg = window.ncSender.onServerEvent('dongle:device-message', function(m) {
           if (!m || m.name !== DEVICE) return;
-          wl.connected = true; wl.lastSeenMs = 0; parsePayload(m.payload); renderWireless();
+          // Any message from this device implies it's paired (server tracks
+          // it in _devices) — flip both known and connected true.
+          wl.known = true; wl.connected = true; wl.lastSeenMs = 0;
+          parsePayload(m.payload); renderWireless();
         });
         if (!offChg) offChg = window.ncSender.onServerEvent('dongle:device-changed', function(c) {
           if (!c || c.name !== DEVICE) return;
-          wl.connected = !!c.connected; renderWireless();
+          // Being tracked in _devices at all means paired. Server sets
+          // Connected=false when this device unpairs OR its link dies —
+          // fetchDevice() gives us the real "still in the table?" answer,
+          // so just re-fetch to keep known/connected consistent.
+          wl.connected = !!c.connected;
+          renderWireless();
+          if (!c.connected) fetchDevice();
         });
       } else if (!pollTimer) {
         pollTimer = setInterval(fetchDevice, 1000);
@@ -393,16 +1128,11 @@
     window.addEventListener('unload', stopWirelessLive);
 
     // ---------- Mode switching (toggle: off = wired, on = wireless) ----------
-    var MODE_HELP = {
-      wired: 'Wired: inject your G-code retract/expand sequences (pneumatic M8/M9).',
-      wireless: 'Wireless: drive the ESP-NOW stepper board directly through the dongle.'
-    };
     function setMode(mode) {
       currentMode = (mode === 'wireless') ? 'wireless' : 'wired';
       document.getElementById('adb-modeToggle').checked = currentMode === 'wireless';
       document.getElementById('adb-label-wired').classList.toggle('active', currentMode === 'wired');
       document.getElementById('adb-label-wireless').classList.toggle('active', currentMode === 'wireless');
-      document.getElementById('adb-mode-help').textContent = MODE_HELP[currentMode];
       document.getElementById('adb-wired').style.display = currentMode === 'wired' ? '' : 'none';
       document.getElementById('adb-wireless').style.display = currentMode === 'wireless' ? '' : 'none';
       if (currentMode === 'wired') {
@@ -411,13 +1141,47 @@
         if (expandEditor) expandEditor.layout();
       } else {
         startWirelessLive();
+        // Always kick off a fresh probe when the wireless panel becomes
+        // active — replaces the old manual refresh button. Fire-and-forget,
+        // the UI updates as each stage resolves (port → license → GitHub).
+        checkFirmware();
       }
     }
     document.getElementById('adb-modeToggle').addEventListener('change', function() {
       setMode(this.checked ? 'wireless' : 'wired');
     });
-    document.getElementById('adb-label-wired').addEventListener('click', function() { setMode('wired'); });
-    document.getElementById('adb-label-wireless').addEventListener('click', function() { setMode('wireless'); });
+    document.getElementById('adb-label-wired').addEventListener('click', function(e) {
+      if (e.target && e.target.classList && e.target.classList.contains('adb-info')) return;
+      setMode('wired');
+    });
+    document.getElementById('adb-label-wireless').addEventListener('click', function(e) {
+      if (e.target && e.target.classList && e.target.classList.contains('adb-info')) return;
+      setMode('wireless');
+    });
+
+    // Progressive disclosure: tap-to-toggle for touch devices (hover works on desktop).
+    // Capture phase so we can stopPropagation BEFORE the click reaches the parent button
+    // (e.g. Pair / Unpair) that contains the ⓘ span.
+    document.addEventListener('click', function(e) {
+      var t = e.target;
+      if (t && t.classList && t.classList.contains('adb-info')) {
+        e.stopPropagation();
+        e.preventDefault();
+        var wasOpen = t.classList.contains('adb-info--open');
+        document.querySelectorAll('.adb-info--open').forEach(function(n) { n.classList.remove('adb-info--open'); });
+        if (!wasOpen) t.classList.add('adb-info--open');
+        return;
+      }
+      document.querySelectorAll('.adb-info--open').forEach(function(n) { n.classList.remove('adb-info--open'); });
+    }, true);
+    document.addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var t = e.target;
+      if (t && t.classList && t.classList.contains('adb-info')) {
+        e.preventDefault();
+        t.classList.toggle('adb-info--open');
+      }
+    });
 
     // ---------- Load / save ----------
     function initUI(settings) {
@@ -479,19 +1243,472 @@
     }
 
     // Pairing actions (generic dongle API).
+    // Countdown ticks every 1s so the user sees the window shrinking.
+    // Stops early if the pendant/device becomes connected before 30s elapse.
     var pairBtn = document.getElementById('adb-pairBtn');
+    var pairCountdownIv = null;
+    function endPairCountdown(origLabel) {
+      if (pairCountdownIv) { clearInterval(pairCountdownIv); pairCountdownIv = null; }
+      pairBtn.textContent = origLabel;
+      pairBtn.disabled = false;
+    }
     pairBtn.addEventListener('click', function() {
       fetch(BASE_URL + '/api/dongle/pair', { method: 'POST' }).catch(function() {});
       var orig = pairBtn.textContent;
-      pairBtn.textContent = 'Pairing window open (30s)…';
+      var remaining = 30;
       pairBtn.disabled = true;
-      setTimeout(function() { pairBtn.textContent = orig; pairBtn.disabled = false; }, 30000);
+      pairBtn.textContent = 'Pairing… ' + remaining + 's';
+      if (pairCountdownIv) clearInterval(pairCountdownIv);
+      pairCountdownIv = setInterval(function() {
+        remaining -= 1;
+        // Bail out early if the AutoDustBoot linked up during the window.
+        if (wl.connected || remaining <= 0) { endPairCountdown(orig); return; }
+        pairBtn.textContent = 'Pairing… ' + remaining + 's';
+      }, 1000);
     });
+
+    // Unpair goes through a confirmation modal — it's destructive and the
+    // user has to re-pair before the device works again.
+    var unpairModal = document.getElementById('adb-unpair-confirm');
     document.getElementById('adb-unpairBtn').addEventListener('click', function() {
-      fetch(BASE_URL + '/api/dongle/devices/' + DEVICE + '/unpair', { method: 'POST' }).catch(function() {});
+      unpairModal.style.display = '';
+    });
+    document.getElementById('adb-unpair-cancel').addEventListener('click', function() {
+      unpairModal.style.display = 'none';
+    });
+    unpairModal.addEventListener('click', function(e) {
+      if (e.target === unpairModal) unpairModal.style.display = 'none';
+    });
+    document.getElementById('adb-unpair-confirm-btn').addEventListener('click', function() {
+      // Tell the board to forget the adapter first (over the still-live ESP-NOW
+      // link), then unpair on the dongle side. The board turns on its pairing
+      // strobe + starts scanning immediately, so a re-pair is one click away
+      // — no physical RETRACT+EXTEND long-press required.
+      unpairModal.style.display = 'none';
+      var deviceUnpair = function() {
+        fetch(BASE_URL + '/api/dongle/devices/' + DEVICE + '/unpair', { method: 'POST' }).catch(function() {});
+      };
+      if (wl.connected) {
+        send('unpair');
+        setTimeout(deviceUnpair, 250);   // let the packet reach the board before the link dies
+      } else {
+        deviceUnpair();
+      }
     });
 
     document.getElementById('adb-saveBtn').addEventListener('click', saveAndClose);
+
+    // ---------- Firmware update (USB OTA) ----------
+    // The server exposes generic serial/OTA endpoints under /api/plugin-serial/*
+    // (nothing device-specific). The AutoDustBoot-specific bits live here:
+    // the firmware repo, the asset naming, the $VERSION handshake, the regex
+    // for the reply, the "deviceId" tag we use to filter WebSocket events.
+    var FW_DEVICE_ID     = 'autodustboot';
+    var FW_PRODUCT       = 'AutoDustBoot';       // matches firmware LICENSE_PRODUCT + activation server registry
+    var FW_RELEASES_REPO = 'siganberg/ncSender.autodustboot.releases';
+    var FW_ASSET_NAME    = function(version) { return 'firmware_autodustboot_v' + version + '.bin'; };
+    var FW_PROBE_REQUEST = '$VERSION\n';
+    var FW_PROBE_REGEX   = '^\\$VERSION:(\\d+\\.\\d+\\.\\d+)$';
+
+    var fw = { checking: false, updating: false, current: '', latest: '', updateAvailable: false, downloadUrl: '', port: '' };
+    var lic = { checked: false, licensed: null, deviceId: '', activating: false };
+
+    function setFwStatus(kind, text, showSpinner) {
+      var el = document.getElementById('adb-fw-status');
+      el.className = 'adb-fw-status ' +
+        (kind === 'ok' ? 'adb-fw-status--ok' :
+         kind === 'warn' ? 'adb-fw-status--warn' :
+         kind === 'err' ? 'adb-fw-status--err' : 'adb-fw-status--muted');
+      el.innerHTML = '';
+      if (showSpinner) {
+        var sp = document.createElement('span');
+        sp.className = 'adb-fw-spin';
+        el.appendChild(sp);
+      }
+      var txt = document.createElement('span');
+      txt.textContent = text;
+      el.appendChild(txt);
+    }
+
+    function showFwVersions(_current, _latest) { /* versions now embedded in status text */ }
+
+    function setFwProgress(pct, msg) {
+      var wrap = document.getElementById('adb-fw-progress-wrap');
+      wrap.style.display = '';
+      document.getElementById('adb-fw-progress-bar').style.width = pct + '%';
+      document.getElementById('adb-fw-progress-pct').textContent = pct + '%';
+      if (msg) document.getElementById('adb-fw-progress-msg').textContent = msg;
+    }
+    function hideFwProgress() { document.getElementById('adb-fw-progress-wrap').style.display = 'none'; }
+
+    function updateFwButtons() {
+      document.getElementById('adb-fw-actions').style.display = (fw.checking || fw.updating) ? 'none' : '';
+      document.getElementById('adb-fw-update').style.display  = fw.updateAvailable ? '' : 'none';
+      document.getElementById('adb-fw-flash-file').disabled = fw.updating;
+      document.getElementById('adb-fw-update').disabled = fw.updating;
+    }
+
+    function isNewerVersion(latest, current) {
+      if (!latest) return false;
+      if (!current) return true;
+      var a = latest.split('.').map(Number), b = current.split('.').map(Number);
+      for (var i = 0; i < 3; i++) {
+        var da = a[i] || 0, db = b[i] || 0;
+        if (da > db) return true;
+        if (da < db) return false;
+      }
+      return false;
+    }
+
+    // Probe every non-CNC USB port for the AutoDustBoot's $VERSION reply.
+    async function probeDevice() {
+      var r = await fetch(BASE_URL + '/api/plugin-serial/probe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request: FW_PROBE_REQUEST,
+          responsePattern: FW_PROBE_REGEX,
+          timeoutMs: 900
+        })
+      });
+      if (!r.ok) throw new Error('probe HTTP ' + r.status);
+      return await r.json();
+    }
+
+    // Ask GitHub for the latest release and find our .bin asset. Runs in
+    // the browser directly — GitHub's API has permissive CORS for public
+    // repos, and this keeps the server ignorant of what "AutoDustBoot" is.
+    async function fetchLatestRelease() {
+      var url = 'https://api.github.com/repos/' + FW_RELEASES_REPO + '/releases/latest';
+      var r = await fetch(url, { headers: { 'Accept': 'application/vnd.github+json' } });
+      if (!r.ok) return null;
+      var release = await r.json();
+      var tag = (release.tag_name || '').replace(/^v/, '');
+      var wantedName = FW_ASSET_NAME(tag).toLowerCase();
+      var asset = (release.assets || []).find(function(a) {
+        return (a.name || '').toLowerCase() === wantedName;
+      });
+      return {
+        latest: tag,
+        downloadUrl: asset ? asset.browser_download_url : ''
+      };
+    }
+
+    // Send a single line on a known port and expect a matching reply. Reuses
+    // the generic /probe primitive with a single-candidate list so we don't
+    // rescan every port every time.
+    async function serialExchange(port, request, responsePattern, timeoutMs) {
+      var r = await fetch(BASE_URL + '/api/plugin-serial/probe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidates: [port],
+          request: request,
+          responsePattern: responsePattern,
+          timeoutMs: timeoutMs || 1500
+        })
+      });
+      if (!r.ok) throw new Error('serial exchange HTTP ' + r.status);
+      return await r.json();
+    }
+
+    // After the version probe finds the port, ask the board whether it's
+    // licensed AND fetch its device ID. Both come from the LicenseManager
+    // on the firmware side.
+    async function probeLicenseAndId(port) {
+      lic.licensed = null; lic.deviceId = '';
+      try {
+        var status = await serialExchange(port, '$LICENSE:STATUS\n',
+          '^\\$LICENSE:STATUS:(LICENSED|UNLICENSED)$', 1200);
+        if (status && status.found) {
+          lic.licensed = (status.match === 'LICENSED');
+        }
+        var id = await serialExchange(port, '$LICENSE:ID\n',
+          '^\\$LICENSE:ID:([0-9a-fA-F]{64})$', 1200);
+        if (id && id.found) lic.deviceId = id.match || '';
+      } catch (_) { /* leave lic.licensed as null → treated as unknown */ }
+      lic.checked = true;
+    }
+
+    // Display the device ID exactly as the activation server records it —
+    // the full 64-char lowercase hex hash, no separators. Users comparing
+    // the plugin field against the "Machine Hash" row on the license page
+    // should see byte-identical strings.
+    function formatDeviceId(hex) {
+      if (!hex || hex.length < 64) return '—';
+      return hex.toLowerCase();
+    }
+
+    function renderActivation() {
+      var card = document.getElementById('adb-activate-card');
+      // Show ONLY when we've probed and the answer is "unlicensed". If we
+      // haven't probed yet (or the board is missing), leave the card hidden.
+      var show = lic.checked && lic.licensed === false;
+      card.style.display = show ? '' : 'none';
+      if (show) {
+        document.getElementById('adb-activate-id').textContent = formatDeviceId(lic.deviceId);
+      }
+      // Anytime we know we're unlicensed, disable jog + action buttons so a
+      // user can't stab at them expecting motion.
+      var motionBlocked = show;   // unlicensed → block motion
+      document.querySelectorAll('#adb-wireless .adb-ctl').forEach(function(b) {
+        // Respect the pre-existing connected-based disable; layer on our own.
+        if (motionBlocked) b.disabled = true;
+      });
+
+      // Header badge — always visible, reflects current knowledge.
+      var badge = document.getElementById('adb-fw-license');
+      var label = badge.querySelector('.adb-fw-license-label');
+      badge.classList.remove('adb-fw-license--ok', 'adb-fw-license--warn');
+      if (!lic.checked) {
+        label.textContent = 'Checking…';
+      } else if (lic.licensed === true) {
+        badge.classList.add('adb-fw-license--ok');
+        label.textContent = 'License activated';
+      } else if (lic.licensed === false) {
+        badge.classList.add('adb-fw-license--warn');
+        label.textContent = 'Not activated';
+      } else {
+        label.textContent = 'Board not detected';
+      }
+    }
+
+    async function checkFirmware() {
+      if (fw.checking || fw.updating) return;
+      fw.checking = true;
+      updateFwButtons();
+      setFwStatus('muted', 'Checking for updates…', true);
+      showFwVersions('', '');
+      try {
+        // 1. Detect the board on USB (may fail if unplugged — that's OK,
+        //    we can still show latest-available info).
+        var detected = null;
+        try { detected = await probeDevice(); } catch (_) { /* proceed */ }
+        fw.current = (detected && detected.found) ? (detected.match || '') : '';
+        fw.port    = (detected && detected.found) ? (detected.port  || '') : '';
+
+        // Nothing on USB — short-circuit. Don't hit GitHub, don't leave
+        // the header badge stuck on "Checking…".
+        if (!fw.port) {
+          lic.checked = true;   // "Board not detected" (not "Checking…")
+          renderActivation();
+          setFwStatus('muted', 'Plug in via USB to check for updates.');
+          return;
+        }
+
+        // 1a. Ask whether the board is licensed. Drives the Activation card
+        //     + gates jog/action buttons.
+        await probeLicenseAndId(fw.port);
+        renderActivation();
+
+        // 2. Latest release from GitHub
+        var release = await fetchLatestRelease();
+        fw.latest = release ? release.latest : '';
+        fw.downloadUrl = release ? release.downloadUrl : '';
+        fw.updateAvailable = fw.current && fw.latest && isNewerVersion(fw.latest, fw.current);
+
+        showFwVersions(fw.current, fw.latest);
+        if (fw.updateAvailable) {
+          setFwStatus('warn', 'Update available: v' + fw.latest + '.');
+        } else {
+          setFwStatus('ok', 'Firmware is up to date (v' + fw.current + ').');
+        }
+      } catch (e) {
+        setFwStatus('err', 'Failed to check for updates.');
+      } finally {
+        fw.checking = false;
+        updateFwButtons();
+      }
+    }
+
+    async function postFlash(binaryBlob) {
+      if (!fw.port) { throw new Error('AutoDustBoot port not known — refresh first'); }
+      var fd = new FormData();
+      fd.append('file', binaryBlob, 'firmware.bin');
+      fd.append('port', fw.port);
+      fd.append('deviceId', FW_DEVICE_ID);
+      var r = await fetch(BASE_URL + '/api/plugin-serial/ota/flash', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error('flash start HTTP ' + r.status);
+    }
+
+    async function startUpdateFromRelease() {
+      if (fw.updating) return;
+      fw.updating = true;
+      updateFwButtons();
+      setFwStatus('muted', 'Downloading v' + fw.latest + '…', true);
+      setFwProgress(0, 'Downloading…');
+      try {
+        var r = await fetch(fw.downloadUrl);
+        if (!r.ok) throw new Error('download HTTP ' + r.status);
+        var blob = await r.blob();
+        setFwStatus('muted', 'Uploading to AutoDustBoot…', true);
+        await postFlash(blob);
+      } catch (e) {
+        setFwStatus('err', 'Failed to start update: ' + (e.message || e));
+        fw.updating = false;
+        hideFwProgress();
+        updateFwButtons();
+      }
+    }
+
+    async function startFlashFromFile(file) {
+      if (fw.updating) return;
+      // Ensure we have a port — a fresh refresh handles the "plugged in
+      // just now" case.
+      if (!fw.port) {
+        setFwStatus('muted', 'Locating AutoDustBoot on USB…', true);
+        try {
+          var d = await probeDevice();
+          if (!d.found) throw new Error('AutoDustBoot not detected on USB');
+          fw.port = d.port; fw.current = d.match || '';
+          showFwVersions(fw.current, fw.latest);
+        } catch (e) {
+          setFwStatus('err', e.message || 'AutoDustBoot not detected');
+          return;
+        }
+      }
+      fw.updating = true;
+      updateFwButtons();
+      setFwStatus('muted', 'Uploading ' + file.name + '…', true);
+      setFwProgress(0, 'Uploading…');
+      try { await postFlash(file); }
+      catch (e) {
+        setFwStatus('err', 'Failed to start update: ' + (e.message || e));
+        fw.updating = false;
+        hideFwProgress();
+        updateFwButtons();
+      }
+    }
+
+    // ---------- Activation ----------
+    function setActivateStatus(kind, text) {
+      var el = document.getElementById('adb-activate-status');
+      el.className = 'adb-activate-status ' +
+        (kind === 'err' ? 'adb-activate-status--err' :
+         kind === 'ok'  ? 'adb-activate-status--ok'  : '');
+      el.textContent = text || '';
+    }
+
+    async function activateBoard() {
+      if (lic.activating) return;
+      var installationId = (document.getElementById('adb-activate-installation').value || '').trim();
+      if (!installationId) { setActivateStatus('err', 'Enter your Installation ID.'); return; }
+      if (!fw.port || !lic.deviceId) {
+        setActivateStatus('err', 'Board not detected. Plug it in via USB and refresh.');
+        return;
+      }
+      lic.activating = true;
+      document.getElementById('adb-activate-btn').disabled = true;
+      setActivateStatus('', 'Contacting the activation server…');
+      try {
+        // 1. Ask the activation server (via server proxy) for a signed license.
+        var r = await fetch(BASE_URL + '/api/plugin-license/activate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            installationId: installationId,
+            product: FW_PRODUCT,
+            machineHash: lic.deviceId
+          })
+        });
+        if (!r.ok) {
+          var errText = '';
+          try { var body = await r.json(); errText = body.error || body.message || ''; } catch (_) {}
+          throw new Error(errText || ('activation HTTP ' + r.status));
+        }
+        var licenseJson = await r.text();
+
+        // 2. Push the license blob to the board via a single-line command.
+        //    The firmware buffers up to ~1.5 KB per line so the whole JSON
+        //    fits comfortably.
+        setActivateStatus('', 'Installing license…');
+        var sent = await serialExchange(
+          fw.port,
+          '$LICENSE:SET ' + licenseJson.replace(/\r?\n/g, '') + '\n',
+          '^\\$LICENSE:(OK|ERR:.*)$',
+          4000
+        );
+        if (!sent || !sent.found)     throw new Error('No response from board');
+        if (sent.match && sent.match.indexOf('ERR:') === 0)
+          throw new Error(sent.match.slice(4));
+
+        // 3. Firmware stays up and runs a post-activation homing itself
+        //    (see main.cpp $LICENSE:SET handler). Optimistically flip the
+        //    local license flag and re-render so the activation card hides
+        //    right away — a background re-probe still runs to confirm.
+        setActivateStatus('ok', 'Activated. Homing…');
+        lic.licensed = true;
+        lic.checked = true;
+        renderActivation();
+        setTimeout(function() {
+          checkFirmware();     // background re-probe to confirm
+        }, 1500);
+      } catch (e) {
+        setActivateStatus('err', 'Activation failed: ' + (e.message || e));
+      } finally {
+        lic.activating = false;
+        document.getElementById('adb-activate-btn').disabled = false;
+      }
+    }
+
+    async function removeLicense() {
+      if (!fw.port) return;
+      if (!confirm('Remove the license from this board? The motor will be disabled until you re-activate.')) return;
+      try {
+        var r = await serialExchange(fw.port, '$LICENSE:REMOVE\n', '^\\$LICENSE:OK$', 1500);
+        if (!r || !r.found) throw new Error('No response');
+        setActivateStatus('ok', 'License removed. Re-activate to enable motion.');
+        setTimeout(checkFirmware, 600);
+      } catch (e) {
+        setActivateStatus('err', 'Failed to remove license: ' + (e.message || e));
+      }
+    }
+
+    document.getElementById('adb-activate-btn').addEventListener('click', activateBoard);
+    document.getElementById('adb-activate-installation').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); activateBoard(); }
+    });
+
+    // No manual refresh button — the checkFirmware call is fired every time
+    // the wireless panel becomes active (see setMode below). This way the
+    // dialog always shows fresh state without the user having to click ⟳.
+    document.getElementById('adb-fw-update').addEventListener('click', startUpdateFromRelease);
+    document.getElementById('adb-fw-flash-file').addEventListener('click', function() {
+      document.getElementById('adb-fw-file-input').click();
+    });
+    document.getElementById('adb-fw-file-input').addEventListener('change', function(e) {
+      var f = e.target.files && e.target.files[0];
+      if (f) startFlashFromFile(f);
+      e.target.value = '';
+    });
+
+    // Live progress via WebSocket. The generic `plugin-ota:*` events carry
+    // a deviceId — we only react to our own.
+    function isOurs(d) { return d && (!d.deviceId || d.deviceId === FW_DEVICE_ID); }
+    if (window.ncSender && typeof window.ncSender.onServerEvent === 'function') {
+      window.ncSender.onServerEvent('plugin-ota:progress', function(d) {
+        if (isOurs(d) && typeof d.percent === 'number') setFwProgress(d.percent, 'Uploading firmware…');
+      });
+      window.ncSender.onServerEvent('plugin-ota:message', function(d) {
+        if (isOurs(d) && d.content) setFwStatus(d.type === 'error' ? 'err' : 'muted', d.content, true);
+      });
+      window.ncSender.onServerEvent('plugin-ota:error', function(d) {
+        if (!isOurs(d)) return;
+        fw.updating = false;
+        hideFwProgress();
+        setFwStatus('err', (d && d.content) || 'Firmware update failed.');
+        updateFwButtons();
+      });
+      window.ncSender.onServerEvent('plugin-ota:done', function(d) {
+        if (!isOurs(d)) return;
+        fw.updating = false;
+        setFwProgress(100, 'Done. Board rebooting…');
+        setFwStatus('ok', 'Firmware updated successfully. Board is rebooting.');
+        updateFwButtons();
+        setTimeout(function() {
+          hideFwProgress();
+          checkFirmware();   // re-probe to confirm the new version
+        }, 2500);
+      });
+    }
+
     init();
   })();
 </script>
