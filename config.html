@@ -1511,9 +1511,9 @@
 
         showFwVersions(fw.current, fw.latest);
         if (fw.updateAvailable) {
-          setFwStatus('warn', 'Update available: v' + fw.latest + '.');
+          setFwStatus('warn', 'Update available: v' + fw.latest);
         } else {
-          setFwStatus('ok', 'Firmware is up to date (v' + fw.current + ').');
+          setFwStatus('ok', 'Firmware is up to date (v' + fw.current + ')');
         }
       } catch (e) {
         setFwStatus('err', 'Failed to check for updates.');
@@ -1540,11 +1540,21 @@
       setFwStatus('muted', 'Downloading v' + fw.latest + '…', true);
       setFwProgress(0, 'Downloading…');
       try {
-        var r = await fetch(fw.downloadUrl);
-        if (!r.ok) throw new Error('download HTTP ' + r.status);
-        var blob = await r.blob();
+        // Delegate the download to the server. GitHub release-asset URLs don't
+        // return CORS headers, so a browser-side fetch fails with 'Failed to
+        // fetch'. The server has no such restriction and streams the bytes
+        // straight into the OTA flash it kicks off next.
+        var r = await fetch(BASE_URL + '/api/plugin-serial/ota/flash-from-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            downloadUrl: fw.downloadUrl,
+            port: fw.port,
+            deviceId: FW_DEVICE_ID
+          })
+        });
+        if (!r.ok) throw new Error('server flash HTTP ' + r.status);
         setFwStatus('muted', 'Uploading to AutoDustBoot…', true);
-        await postFlash(blob);
       } catch (e) {
         setFwStatus('err', 'Failed to start update: ' + (e.message || e));
         fw.updating = false;
