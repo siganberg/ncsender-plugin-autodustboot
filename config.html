@@ -875,10 +875,12 @@
     var DEFAULT_RETRACT = 'M8\nG4 P0.1\nM9';
     var DEFAULT_EXPAND = 'M8';
 
-    // Firmware reports position in encoder counts (home = 0, extend = +). Its travel limit is
-    // MAX_TRAVEL = 40000 counts = 100 mm, i.e. 400 counts/mm. Keep in sync with the firmware.
-    var COUNTS_PER_MM = 400;
-    var TRAVEL_MM = 100;
+    // Firmware reports position in encoder counts (home = 0, extend = +). Measured
+    // calibration: 505.7 counts/mm (44500 counts tape-measured at 88 mm). Bottom limit
+    // then raised to 92 mm => firmware MAX_TRAVEL = 46524 counts. Keep COUNTS_PER_MM,
+    // TRAVEL_MM and the firmware MAX_TRAVEL in sync when the bottom limit changes.
+    var COUNTS_PER_MM = 505.7;
+    var TRAVEL_MM = 92;
     var RETRACT_TOL_MM = 0.3;   // within this of 0 -> treat as fully retracted
 
     var retractEditor = null;
@@ -1087,8 +1089,25 @@
     }
     document.querySelectorAll('#adb-wireless [data-jog]').forEach(function(b) {
       var dir = b.getAttribute('data-jog');
-      var press = function() { b.classList.add('pressed'); startJog(dir); };
-      var release = function() { b.classList.remove('pressed'); stopJog(); };
+      // Mirror the physical button: quick TAP -> one precise step ('stepup'/'stepdown');
+      // HOLD (past 300ms) -> continuous jog with keepalive, 'stop' on release. A tap must
+      // NOT start the continuous jog — otherwise a lost 'stop' packet runs the motor the
+      // whole keepalive window (the erratic slow-nudge / sudden-jump behavior).
+      var holdT = null, holding = false, active = false;
+      var press = function() {
+        if (active) return;
+        active = true; holding = false;
+        b.classList.add('pressed');
+        holdT = setTimeout(function() { holding = true; startJog(dir); }, 300);
+      };
+      var release = function() {
+        if (!active) return;
+        active = false;
+        b.classList.remove('pressed');
+        if (holdT) { clearTimeout(holdT); holdT = null; }
+        if (holding) stopJog();                 // was a hold -> stop continuous jog
+        else send('step' + dir);                // was a tap  -> one bounded step (stepup/stepdown)
+      };
       b.addEventListener('mousedown', press);
       b.addEventListener('mouseup', release);
       b.addEventListener('mouseleave', release);
