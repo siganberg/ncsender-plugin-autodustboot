@@ -994,7 +994,7 @@
         if (eq <= 0) return;
         var k = tok.slice(0, eq), v = tok.slice(eq + 1);
         if (k === 'pos') wl.pos = parseInt(v, 10);
-        else if (k === 'saved') wl.saved = parseInt(v, 10);
+        else if (k === 'saved' || k === 'expand') wl.saved = parseInt(v, 10);  // firmware emits "expand="
         else if (k === 'state') wl.state = v;
         else if (k === 'homed') wl.homed = (v === '1' || v.toLowerCase() === 'true');
       });
@@ -1371,7 +1371,9 @@
         body: JSON.stringify({
           request: FW_PROBE_REQUEST,
           responsePattern: FW_PROBE_REGEX,
-          timeoutMs: 900
+          // Native-USB boards reset when the port opens and take ~1s to boot
+          // before they answer $VERSION; 900ms missed it by ~80ms. Widen it.
+          timeoutMs: 2500
         })
       });
       if (!r.ok) throw new Error('probe HTTP ' + r.status);
