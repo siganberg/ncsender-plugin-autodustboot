@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { onBeforeCommand, buildInitialConfig, onAfterJobEnd } from './commands.js';
+import { onBeforeCommand, buildInitialConfig, onAfterJobEnd, injectDustBootMarkers } from './commands.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +23,10 @@ export async function onLoad(ctx) {
   ctx.registerEventHandler('onBeforeCommand', async (commands, context) => {
     const settings = buildInitialConfig(ctx.getSettings() || {});
     return onBeforeCommand(commands, context, settings);
+  });
+
+  ctx.registerEventHandler('onGcodeProgramLoad', async (content) => {
+    return injectDustBootMarkers(content);
   });
 
   ctx.registerEventHandler('onAfterJobEnd', async () => {

@@ -17,7 +17,7 @@
     "pro-v1": "0.3.19",
     "pro-v2": "2.0.0"
   },
-  "events": ["onBeforeCommand", "onAfterJobEnd"],
+  "events": ["onBeforeCommand", "onAfterJobEnd", "onGcodeProgramLoad"],
   "permissions": ["gcode.modify"],
   "toolMenu": [
     { "id": "open-config", "label": "AutoDustBoot", "icon": "icon.png", "clientOnly": true }
