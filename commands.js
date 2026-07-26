@@ -203,7 +203,7 @@ const buildInitialConfig = function(raw) {
   if (!raw) raw = {};
   return {
     mode: raw.mode === 'wireless' ? 'wireless' : 'wired',
-    retractCommand: raw.retractCommand || 'M8\nG4 P0.1\nM9',
+    retractCommand: raw.retractCommand || 'M8\nG4 P0.1\nM9\nG4 P1.5',
     expandCommand: raw.expandCommand || 'M8',
     retractOnHome: raw.retractOnHome !== undefined ? raw.retractOnHome : true,
     retractOnRapidMove: raw.retractOnRapidMove !== undefined ? raw.retractOnRapidMove : true,
@@ -241,6 +241,29 @@ function onBeforeCommand(commands, context, settings) {
     };
   }
 
+  // Two-command replacement for the wired retract/expand markers:
+  //   cmd 1 = a standalone "G4 P0" planner-sync barrier (its own command, NOT
+  //           folded into the sequence, so grblHAL drains all queued motion —
+  //           the machine physically reaches position — before the M-code fires)
+  //   cmd 2 = the user-configured retract/expand sequence
+  // When "show added g-code" is on, the Start/End comments wrap the whole pair as
+  // one encapsulated unit: the Start comment rides with the sync (cmd 1) and the
+  // End comment rides with the sequence (cmd 2).
+  function syncedSequence(commandText) {
+    var first = [];
+    if (showAddedGCode) first.push('(Start of AutoDustBoot Plugin Sequence)');
+    first.push('G4 P0');
+
+    var second = [];
+    second.push(commandText);
+    if (showAddedGCode) second.push('(End of AutoDustBoot Plugin Sequence)');
+
+    return [
+      { command: first.join('\n'), displayCommand: null, meta: showAddedGCode ? {} : { silent: true } },
+      { command: second.join('\n'), displayCommand: null, meta: showAddedGCode ? {} : { silent: true } }
+    ];
+  }
+
   // === Runtime marker interception ===
   // Markers were inserted at load time by injectDustBootMarkers().
   //   Wired:    substitute with the user-configured retract/expand M-code sequence.
@@ -261,7 +284,8 @@ function onBeforeCommand(commands, context, settings) {
         wirelessSend('retract');
         commands.splice(mi, 1, createCommandSequence(dwellCommand()));
       } else if (retractCommand) {
-        commands.splice(mi, 1, createCommandSequence(retractCommand));
+        var rseq = syncedSequence(retractCommand);
+        commands.splice(mi, 1, rseq[0], rseq[1]);
       } else {
         commands.splice(mi, 1);
       }
@@ -272,7 +296,8 @@ function onBeforeCommand(commands, context, settings) {
         wirelessSend('expand');
         commands.splice(mi, 1, createCommandSequence(dwellCommand()));
       } else if (expandCommand) {
-        commands.splice(mi, 1, createCommandSequence(expandCommand));
+        var eseq = syncedSequence(expandCommand);
+        commands.splice(mi, 1, eseq[0], eseq[1]);
       } else {
         commands.splice(mi, 1);
       }
