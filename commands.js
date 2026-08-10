@@ -73,6 +73,44 @@ function wirelessSend(payload) {
   }
 }
 
+// The AutoDustBoot firmware only accepts `goto:N` / `home` / `save` /
+// `stop` — NOT `retract` / `expand`. These helpers translate our intent
+// to the firmware protocol. Retract = go to position 0. Expand = go to
+// the last known "expand" (saved) position — read from the device's
+// most-recent status frame via pluginContext.dongle.getDevices() (which
+// carries `lastMessage` like "status pos=-3 expand=46524 state=home").
+function wirelessRetract() {
+  wirelessSend('goto:0');
+}
+
+function wirelessExpand() {
+  var savedPos = readSavedExpandPosition();
+  if (savedPos !== null) {
+    wirelessSend('goto:' + savedPos);
+  }
+  // If we don't know the saved position (device never reported one), skip
+  // the send rather than guess. Operator can pair / save an expand target
+  // via the plugin's config panel; without one, expand can't fire safely.
+}
+
+function readSavedExpandPosition() {
+  try {
+    if (typeof pluginContext === 'undefined' || !pluginContext || !pluginContext.dongle
+        || typeof pluginContext.dongle.getDevices !== 'function') {
+      return null;
+    }
+    var devices = pluginContext.dongle.getDevices();
+    for (var i = 0; i < devices.length; i++) {
+      var d = devices[i];
+      if (d && d.name === ADB_DEVICE_NAME && typeof d.lastMessage === 'string') {
+        var m = d.lastMessage.match(/(?:^|\s)expand=(-?\d+)(?:\s|$)/);
+        if (m) return parseInt(m[1], 10);
+      }
+    }
+  } catch (_) { /* swallow — fall through to null */ }
+  return null;
+}
+
 function dwellCommand() {
   return 'G4 P' + ADB_WIRELESS_DWELL_SECONDS;
 }
@@ -197,6 +235,19 @@ function injectDustBootMarkers(content) {
 
 let isToolChanging = false;
 
+// True whenever retract has fired without a matching expand — i.e., the
+// dust boot is (or should be) up out of the way. Consumed by the first
+// G0-with-XY of a job/preamble line we see. Set by every retract path
+// (job start, M6 detection, RETRACT marker); cleared on expand or job end.
+// Prevents double-retract when several triggers land back-to-back (e.g.
+// start-from-line preamble that also contains an M6).
+let awaitingExpand = false;
+
+// Last-observed context.jobRunning value. Used to detect the false→true
+// transition (job start / start-from-line preamble start) so we can inject
+// retract exactly once per job run. Set on every onBeforeCommand call.
+let wasJobRunning = false;
+
 // === Settings Sanitization ===
 
 const buildInitialConfig = function(raw) {
@@ -264,100 +315,164 @@ function onBeforeCommand(commands, context, settings) {
     ];
   }
 
-  // === Runtime marker interception ===
-  // Markers were inserted at load time by injectDustBootMarkers().
-  //   Wired:    substitute with the user-configured retract/expand M-code sequence.
-  //   Wireless: fire an ESP-NOW "retract" / "expand" to the AutoDustBoot device
-  //             (the firmware knows the saved expand position), then substitute
-  //             the marker with a G4 dwell so the controller blocks long enough
-  //             for the boot to physically move before the next line goes out.
-  var isJobLine = false;
+  // Retract emission (wired vs wireless) — shared by every path that needs
+  // to physically raise the boot. Returns an ARRAY of command objects the
+  // caller splices into the batch. Wired: sync barrier + user M-codes.
+  // Wireless: ESP-NOW "retract" packet + G4 dwell so the boot has time to
+  // move before the next line ships.
+  // Wireless emission uses the `(DONGLE:name:payload)` host-intercept
+  // sentinel so ESP-NOW fires at CNC-serial-write time, AFTER grblHAL has
+  // ack'd every queued command ahead of it. Sequence:
+  //   1. G4 P0 — grblHAL planner-sync; only ok'd once physical moves finish.
+  //   2. (DONGLE:autodustboot:goto:0) — host intercepts, sends ESP-NOW.
+  //   3. G4 P1.5 — dwell so the boot has time to physically move before
+  //      the next command runs.
+  // Without the G4 P0 barrier, the sentinel would fire mid-cut because
+  // grblHAL ok's queued lines the moment they enter the planner buffer,
+  // not when they physically execute.
+  function emitWirelessDongleSequence(payload) {
+    var syncBarrier = { command: 'G4 P0', displayCommand: null, meta: showAddedGCode ? {} : { silent: true } };
+    var sentinel    = { command: '(DONGLE:' + ADB_DEVICE_NAME + ':' + payload + ')',
+                        displayCommand: null, meta: showAddedGCode ? {} : { silent: true } };
+    var dwell       = createCommandSequence(dwellCommand());
+    return [syncBarrier, sentinel, dwell];
+  }
+  function emitRetract() {
+    if (settings.mode === 'wireless') {
+      return emitWirelessDongleSequence('goto:0');
+    }
+    if (!retractCommand) return [];
+    var s = syncedSequence(retractCommand);
+    return [s[0], s[1]];
+  }
+  function emitExpand() {
+    if (settings.mode === 'wireless') {
+      var savedPos = readSavedExpandPosition();
+      if (savedPos === null) return [];   // no saved target — skip rather than guess
+      return emitWirelessDongleSequence('goto:' + savedPos);
+    }
+    if (!expandCommand) return [];
+    var s = syncedSequence(expandCommand);
+    return [s[0], s[1]];
+  }
+
+  // === Marker interception (manual terminal usage) ===
+  // $ADB_RETRACT / $ADB_EXPAND typed at the terminal (or embedded in a
+  // macro / gcode file by the operator) get substituted here into the
+  // configured wired M-codes OR a wireless ESP-NOW packet + dwell. This
+  // path also updates awaitingExpand so runtime automation stays coherent
+  // with whatever the operator did manually.
   for (var mi = 0; mi < commands.length; mi++) {
     var mcmd = commands[mi];
     if (!mcmd.isOriginal) continue;
-    var mrawTrimmed = mcmd.command.trim();
-    if (looksLikeJobLine(mrawTrimmed)) isJobLine = true;
-    var mtext = stripNPrefix(mrawTrimmed);
+    var mtext = stripNPrefix(mcmd.command.trim());
 
     if (startsWithMarker(mtext, RETRACT_MARKER)) {
-      if (settings.mode === 'wireless') {
-        wirelessSend('retract');
-        commands.splice(mi, 1, createCommandSequence(dwellCommand()));
-      } else if (retractCommand) {
-        var rseq = syncedSequence(retractCommand);
-        commands.splice(mi, 1, rseq[0], rseq[1]);
-      } else {
-        commands.splice(mi, 1);
-      }
+      var rEmit = emitRetract();
+      if (rEmit.length > 0) commands.splice.apply(commands, [mi, 1].concat(rEmit));
+      else commands.splice(mi, 1);
+      awaitingExpand = true;
       return commands;
     }
     if (startsWithMarker(mtext, EXPAND_MARKER)) {
-      if (settings.mode === 'wireless') {
-        wirelessSend('expand');
-        commands.splice(mi, 1, createCommandSequence(dwellCommand()));
-      } else if (expandCommand) {
-        var eseq = syncedSequence(expandCommand);
-        commands.splice(mi, 1, eseq[0], eseq[1]);
-      } else {
-        commands.splice(mi, 1);
-      }
+      var eEmit = emitExpand();
+      if (eEmit.length > 0) commands.splice.apply(commands, [mi, 1].concat(eEmit));
+      else commands.splice(mi, 1);
+      awaitingExpand = false;
       return commands;
     }
   }
 
-  // Wireless mode drives the ESP-NOW stepper directly (manual controls in the dialog);
-  // beyond the marker interception above, nothing else applies.
-  if (settings.mode === 'wireless') {
-    return commands;
-  }
-
-  var hasExpandRetract = expandCommand && retractCommand;
+  var hasExpandRetract = (settings.mode === 'wireless') || (expandCommand && retractCommand);
   if (!hasExpandRetract) {
+    // No wireless, no configured commands — nothing to inject.
     return commands;
   }
 
-  // === Legacy M6 / $TLS / post-M6-XY tracking ===
-  // Only runs for non-job contexts (client-typed M6, macros). In job context
-  // the load-time marker insertion already handled tool-change retract/expand,
-  // so running this again would double-retract every tool change.
-  // Detect job via N-prefix (GcodeJobProcessor prefixes every job line with
-  // "N<lineNumber> " — context.sourceId is null in job context so it can't be
-  // used reliably).
-  if (!isJobLine) {
-    // Find original M6 or $TLS command
-    var m6Index = commands.findIndex(function(cmd) {
-      if (!cmd.isOriginal) return false;
-      var parsed = parseM6Command(cmd.command);
-      return parsed !== null && parsed.matched && parsed.toolNumber !== null;
-    });
-
-    var tlsIndex = commands.findIndex(function(cmd) {
-      if (!cmd.isOriginal) return false;
-      return /^\$tls/i.test(cmd.command.trim());
-    });
-
-    var toolChangeIndex = m6Index !== -1 ? m6Index : tlsIndex;
-
-    if (toolChangeIndex !== -1) {
-      var isTLS = toolChangeIndex === tlsIndex;
-      var commandText = commands[toolChangeIndex].command.trim();
-
-      if (isTLS) {
-        var sequence = createCommandSequence(retractCommand);
-        commands.splice(toolChangeIndex, 0, sequence);
-        return commands;
-      } else {
-        // M6 command
-        var parsed = parseM6Command(commandText);
-        var toolNumber = parsed !== null ? parsed.toolNumber : null;
-
-        if (toolNumber !== null && Number.isFinite(toolNumber)) {
-          var seq = createCommandSequence(retractCommand);
-          commands.splice(toolChangeIndex, 0, seq);
-          return commands;
+  // === Job-start detection ===
+  // context.jobRunning is true during both the resume preamble and normal
+  // job execution (set by JobManager before either fires). The false→true
+  // transition is exactly one moment per job run — inject retract now so
+  // the boot is up before anything moves. Skip if we already retracted
+  // (awaitingExpand=true means an earlier trigger fired and expand hasn't
+  // consumed it yet — no need to double-retract).
+  //
+  // Fallback for older hosts that don't provide context.jobRunning: treat
+  // sourceId==='resume' as "we're in the preamble" and any N-prefixed
+  // original command as "we're in the job stream". Same transition
+  // semantics from those signals. Lets this plugin work on hosts predating
+  // the jobRunning context field.
+  var jobRunningNow;
+  if (typeof context.jobRunning === 'boolean') {
+    jobRunningNow = context.jobRunning;
+  } else {
+    var inferJob = context.sourceId === 'resume';
+    if (!inferJob) {
+      for (var pi = 0; pi < commands.length; pi++) {
+        if (commands[pi].isOriginal && looksLikeJobLine(commands[pi].command.trim())) {
+          inferJob = true;
+          break;
         }
       }
     }
+    jobRunningNow = inferJob;
+  }
+  if (jobRunningNow && !wasJobRunning && !awaitingExpand) {
+    var jobStartRetract = emitRetract();
+    if (jobStartRetract.length > 0) {
+      commands.splice.apply(commands, [0, 0].concat(jobStartRetract));
+      awaitingExpand = true;
+    }
+  }
+  wasJobRunning = jobRunningNow;
+
+  // === M6 detection (any context) ===
+  // Fires retract before any M6 with a tool number — job line, preamble,
+  // client-typed, macro. Only if we're not already in the awaiting-expand
+  // state (which means retract already ran and expand hasn't consumed it).
+  var m6Index = commands.findIndex(function(cmd) {
+    if (!cmd.isOriginal) return false;
+    var parsed = parseM6Command(cmd.command);
+    return parsed !== null && parsed.matched && parsed.toolNumber !== null;
+  });
+  var tlsIndex = commands.findIndex(function(cmd) {
+    if (!cmd.isOriginal) return false;
+    return /^\$tls/i.test(cmd.command.trim());
+  });
+  var toolChangeIndex = m6Index !== -1 ? m6Index : tlsIndex;
+  if (toolChangeIndex !== -1 && !awaitingExpand) {
+    var m6Retract = emitRetract();
+    if (m6Retract.length > 0) {
+      commands.splice.apply(commands, [toolChangeIndex, 0].concat(m6Retract));
+      awaitingExpand = true;
+    }
+  }
+
+  // === First G0 XY consumes the arm ===
+  // Only fires on isOriginal=true commands so plugin-expanded tool-change
+  // routines (e.g. pneumaticatc's rack moves — those are isOriginal=false)
+  // don't accidentally trigger expand at the rack. Preamble return-to-XY
+  // and normal job-file G0 XY are both isOriginal=true.
+  if (awaitingExpand) {
+    for (var gi = 0; gi < commands.length; gi++) {
+      var gcmd = commands[gi];
+      if (!gcmd.isOriginal) continue;
+      var gtext = stripNPrefix(gcmd.command.trim());
+      if (startsWithMarker(gtext, RETRACT_MARKER) || startsWithMarker(gtext, EXPAND_MARKER)) continue;
+      if (!isG0XYLine(gtext)) continue;
+      var xyExpand = emitExpand();
+      if (xyExpand.length > 0) {
+        commands.splice.apply(commands, [gi + 1, 0].concat(xyExpand));
+        awaitingExpand = false;
+      }
+      break;
+    }
+  }
+
+  // Wireless mode has no legacy client/macro-only retract-on-home/G0 to
+  // consider — the runtime detection above already covered everything.
+  if (settings.mode === 'wireless') {
+    return commands;
   }
 
   // Handle $H home command
@@ -389,16 +504,42 @@ function onBeforeCommand(commands, context, settings) {
   return commands;
 }
 
-function onAfterJobEnd() {
+// Called by the host after every job ends (complete / stop / error).
+// Retract the dust boot so the machine is left in a known safe state —
+// the operator won't get a boot sticking out during post-job cleanup /
+// jog. For wireless installs this MUST fire from here because a bare
+// wireless setup has no CNC-side signal wired to Flood to piggyback on.
+// The CNC is idle by this point (last g-code already ack'd), so ESP-NOW
+// can fire directly without a G4 P0 sync barrier.
+function onAfterJobEnd(settings) {
+  try {
+    // Wireless install has no CNC-side wire to piggyback on — plugin
+    // must explicitly retract so the boot is up for post-job jog /
+    // cleanup. CNC is idle here (last g-code already ack'd), so ESP-NOW
+    // can fire directly without the G4 P0 sync sentinel used mid-job.
+    if (settings && settings.mode === 'wireless') {
+      wirelessSend('goto:0');
+    }
+    // Wired install: the job's own postscript (M9 or the configured
+    // Program-End event g-code) typically triggers the physical retract
+    // because the ADB signal pin is wired to Flood. Plugin doesn't have
+    // a way to inject a command outside a job without a new host hook.
+  } catch (_) { /* swallow — never block job-end teardown */ }
+
   isToolChanging = false;
+  awaitingExpand = false;
+  wasJobRunning = false;
 }
 
-// Top-level hook the host calls at program-load time via
-// state.JintEngine.GetValue("onGcodeProgramLoad"). Must exist as a top-level
-// name in commands.js — the Node-side ctx.registerEventHandler in index.js
-// does NOT wire this path.
+// Top-level hook the host calls at program-load time. We used to inject
+// $ADB_RETRACT / $ADB_EXPAND markers here so runtime substitution had
+// anchors — but start-from-line skips file lines before startLine, which
+// left the currently-loaded tool's expand marker unreached and expand
+// never fired. Everything is runtime-driven now (see onBeforeCommand's
+// job-start + M6 detection), so this hook returns the content unchanged.
+// injectDustBootMarkers is still exported for backward compat / tests.
 function onGcodeProgramLoad(content, _context, _settings) {
-  return injectDustBootMarkers(content);
+  return content;
 }
 
 export { onBeforeCommand, buildInitialConfig, onAfterJobEnd, injectDustBootMarkers, onGcodeProgramLoad };
