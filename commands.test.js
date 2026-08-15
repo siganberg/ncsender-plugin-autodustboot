@@ -142,15 +142,85 @@ describe('M6 detection (any context)', () => {
     assert.ok(g0.length > 1, 'expand should re-arm on M6 and fire on next G0 XY');
   });
 
-  test('manual M6 (jobRunning=false, client context) still fires retract + arms expand', () => {
+  test('manual M6 (jobRunning=false) still fires retract but does NOT arm auto-expand', () => {
+    // Retract remains a safety measure regardless of context (boot up
+    // during tool change) — but auto-expand is a "return-to-workpiece"
+    // cue that only makes sense while a program is running. Manual M6
+    // followed by manual jog shouldn't deploy the boot at whatever
+    // spot the operator jogged to.
     const m6 = wrap('M6 T2');
     onBeforeCommand(m6, ctx({ sourceId: 'client' }), WIRED);
     const combined = m6.map(c => c.command).join('\n');
-    assert.ok(combined.indexOf('M8\nG4 P0.1\nM9\nG4 P1') !== -1, 'retract should fire');
-    // Follow-up G0 XY fires expand.
+    assert.ok(combined.indexOf('M8\nG4 P0.1\nM9\nG4 P1') !== -1, 'retract should still fire');
+    // Follow-up manual G0 XY does NOT fire expand.
     const g0 = wrap('G0 X10 Y20');
     onBeforeCommand(g0, ctx({ sourceId: 'client' }), WIRED);
-    assert.ok(g0.length > 1, 'expand should fire on next G0 XY');
+    const expandFired = g0.some(c => c.command.trim() === 'M8');
+    assert.equal(expandFired, false,
+      `manual G0 XY after manual M6 must NOT auto-expand, got ${JSON.stringify(g0.map(c => c.command))}`);
+  });
+});
+
+describe('auto-expand criteria: running job + first workspace X/Y (skip G53/G28/G30)', () => {
+  // The correct expand rule is:
+  //   1. A job must be running (context.jobRunning).
+  //   2. M6 must have fired (arms awaitingExpand — only inside a job).
+  //   3. Expand fires after the FIRST workspace-coord X or Y motion —
+  //      NOT G53 (machine coord), NOT G28/G30 (predefined position),
+  //      NOT the Z plunge that follows.
+  const EXPAND_TOKEN_CONFIG = buildInitialConfig({
+    mode: 'wired',
+    retractCommand: 'M8\nG4 P0.1\nM9\nG4 P1',
+    expandCommand: 'EXPAND_TOKEN',
+    retractOnRapidMove: false,
+  });
+  const hasExpand = (batch) => batch.some(c => c.command.includes('EXPAND_TOKEN'));
+
+  test('manual M6 + manual G53 G0 XY → no expand (the kiosk-reported bug)', () => {
+    const m6 = wrap('M6 T2');
+    onBeforeCommand(m6, ctx({ sourceId: 'client' }), EXPAND_TOKEN_CONFIG);
+    assert.ok(m6.some(c => c.command.includes('M9')), 'retract should have fired on M6');
+    const g53 = wrap('G53 G21 G90 G0 X1258 Y-2');
+    onBeforeCommand(g53, ctx({ sourceId: 'client' }), EXPAND_TOKEN_CONFIG);
+    assert.equal(hasExpand(g53), false,
+      `manual G53 G0 after manual M6 must NOT trigger expand, got ${JSON.stringify(g53.map(c => c.command))}`);
+    // Even a plain workspace G0 XY manual jog after a manual M6 should
+    // stay quiet — the arm was never set (manual context).
+    const g0 = wrap('G0 X50 Y60');
+    onBeforeCommand(g0, ctx({ sourceId: 'client' }), EXPAND_TOKEN_CONFIG);
+    assert.equal(hasExpand(g0), false,
+      `manual G0 XY after manual M6 must NOT trigger expand, got ${JSON.stringify(g0.map(c => c.command))}`);
+  });
+
+  test('job M6 + job G0 XY → expand fires (original behavior preserved)', () => {
+    const m6 = wrap('M6 T2');
+    onBeforeCommand(m6, ctx({ jobRunning: true }), EXPAND_TOKEN_CONFIG);
+    assert.ok(m6.some(c => c.command.includes('M9')), 'retract should fire on M6 in job');
+    const g0 = wrap('G0 X50 Y60');
+    onBeforeCommand(g0, ctx({ jobRunning: true }), EXPAND_TOKEN_CONFIG);
+    assert.equal(hasExpand(g0), true,
+      `job G0 XY after job M6 must fire expand, got ${JSON.stringify(g0.map(c => c.command))}`);
+  });
+
+  test('job M6 + G53 G0 in tool-change tail + workspace G0 → expand fires only on the workspace G0', () => {
+    // Realistic post-processor tail: raise to safe Z in machine coords,
+    // maybe park somewhere, THEN return to workpiece in workspace coords
+    // before plunging. The G53 lines must pass through untouched; expand
+    // must land after the workspace G0 X/Y (i.e. right before the Z
+    // plunge that follows).
+    const m6 = wrap('M6 T2');
+    onBeforeCommand(m6, ctx({ jobRunning: true }), EXPAND_TOKEN_CONFIG);
+    assert.ok(m6.some(c => c.command.includes('M9')), 'retract on job M6');
+    // Machine-coord safe-Z / park sequence — must NOT trigger expand.
+    const machineTail = wrap('G53 G0 Z0', 'G53 G0 X100 Y200');
+    onBeforeCommand(machineTail, ctx({ jobRunning: true }), EXPAND_TOKEN_CONFIG);
+    assert.equal(hasExpand(machineTail), false,
+      `G53 lines in job tool-change tail must NOT trigger expand, got ${JSON.stringify(machineTail.map(c => c.command))}`);
+    // Workspace-coord return — expand fires here.
+    const workspaceReturn = wrap('G0 X10 Y20');
+    onBeforeCommand(workspaceReturn, ctx({ jobRunning: true }), EXPAND_TOKEN_CONFIG);
+    assert.equal(hasExpand(workspaceReturn), true,
+      `first workspace G0 XY after M6 must fire expand, got ${JSON.stringify(workspaceReturn.map(c => c.command))}`);
   });
 });
 

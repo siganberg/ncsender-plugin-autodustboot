@@ -161,6 +161,15 @@ function parseM6Command(command) {
 
 const M98_PATTERN = /(?:^|[^A-Z])M0*98(?![0-9])/i;
 const G0_XY_PATTERN = /(?:^|[^A-Z])G0*0(?![0-9]).*?(?:^|[^A-Z])[XY][-+]?\d/i;
+// Machine-coord positioning moves (G53) and predefined-position moves
+// (G28 / G30) go to a machine-fixed location — a park spot, the tool
+// changer station, a probe safe corner. They are NOT the "return to
+// the workpiece" move that expands the dust boot; deploying there
+// would put the boot at the wrong physical location. The plugin arms
+// on M6 and waits for the FIRST workspace-coord X/Y motion before
+// firing expand — machine-coord moves in the tool-change tail should
+// pass through untouched.
+const MACHINE_MOVE_PATTERN = /(?:^|[^A-Z])G0*(?:53|28|30)(?![0-9])/i;
 
 function isToolChangeLine(rawLine) {
   if (!rawLine || typeof rawLine !== 'string') return false;
@@ -175,6 +184,7 @@ function isG0XYLine(rawLine) {
   if (!rawLine || typeof rawLine !== 'string') return false;
   if (isGcodeComment(rawLine)) return false;
   const stripped = rawLine.trim().toUpperCase().replace(/^N\d+\s*/, '');
+  if (MACHINE_MOVE_PATTERN.test(stripped)) return false;
   return G0_XY_PATTERN.test(stripped);
 }
 
@@ -430,6 +440,14 @@ function onBeforeCommand(commands, context, settings) {
   // Fires retract before any M6 with a tool number — job line, preamble,
   // client-typed, macro. Only if we're not already in the awaiting-expand
   // state (which means retract already ran and expand hasn't consumed it).
+  //
+  // awaitingExpand is armed ONLY when a job is running. Auto-expand is a
+  // "return-to-workpiece" cue and only makes sense while a program is
+  // executing — during manual M6 the operator is in control and should
+  // decide when the boot deploys. Firing expand on a manual jog after a
+  // manual M6 was the bug that motivated this gate. Retract still fires
+  // unconditionally because a raised boot during tool change is a safety
+  // improvement regardless of context.
   var m6Index = commands.findIndex(function(cmd) {
     if (!cmd.isOriginal) return false;
     var parsed = parseM6Command(cmd.command);
@@ -444,7 +462,7 @@ function onBeforeCommand(commands, context, settings) {
     var m6Retract = emitRetract();
     if (m6Retract.length > 0) {
       commands.splice.apply(commands, [toolChangeIndex, 0].concat(m6Retract));
-      awaitingExpand = true;
+      if (jobRunningNow) awaitingExpand = true;
     }
   }
 
