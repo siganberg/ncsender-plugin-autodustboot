@@ -1544,13 +1544,26 @@
       }
     }
 
+    // Convention (see ncSender project memory): wireless always preferred
+    // over USB when available. postFlash + startUpdateFromRelease each pick
+    // the transport at call time — if the wireless link goes down between
+    // the version check and the click, the fallback to USB is silent.
+    function isWirelessAvailable() { return !!(wl && wl.connected); }
+
     async function postFlash(binaryBlob) {
-      if (!fw.port) { throw new Error('AutoDustBoot port not known — refresh first'); }
+      var wireless = isWirelessAvailable();
       var fd = new FormData();
       fd.append('file', binaryBlob, 'firmware.bin');
-      fd.append('port', fw.port);
       fd.append('deviceId', FW_DEVICE_ID);
-      var r = await fetch(BASE_URL + '/api/plugin-serial/ota/flash', { method: 'POST', body: fd });
+      var url;
+      if (wireless) {
+        url = BASE_URL + '/api/dongle/devices/' + DEVICE + '/ota';
+      } else {
+        if (!fw.port) { throw new Error('AutoDustBoot port not known — refresh first'); }
+        fd.append('port', fw.port);
+        url = BASE_URL + '/api/plugin-serial/ota/flash';
+      }
+      var r = await fetch(url, { method: 'POST', body: fd });
       if (!r.ok) throw new Error('flash start HTTP ' + r.status);
     }
 
@@ -1558,24 +1571,31 @@
       if (fw.updating) return;
       fw.updating = true;
       updateFwButtons();
-      setFwStatus('muted', 'Downloading v' + fw.latest + '…', true);
+      var wireless = isWirelessAvailable();
+      setFwStatus('muted',
+        'Downloading v' + fw.latest + ' — flashing over ' + (wireless ? 'wireless' : 'USB') + '…',
+        true);
       setFwProgress(0, 'Downloading…');
       try {
-        // Delegate the download to the server. GitHub release-asset URLs don't
-        // return CORS headers, so a browser-side fetch fails with 'Failed to
-        // fetch'. The server has no such restriction and streams the bytes
-        // straight into the OTA flash it kicks off next.
-        var r = await fetch(BASE_URL + '/api/plugin-serial/ota/flash-from-url', {
+        var body, url;
+        if (wireless) {
+          // Wireless: server streams over ESP-NOW via the dongle. No USB
+          // port needed — the AutoDustBoot receives OTA frames on-radio.
+          url = BASE_URL + '/api/dongle/devices/' + DEVICE + '/ota-from-url';
+          body = { downloadUrl: fw.downloadUrl, deviceId: FW_DEVICE_ID };
+        } else {
+          // USB: server bypasses browser CORS on GitHub release-asset URLs
+          // and pushes bytes to the AutoDustBoot's USB CDC serial.
+          url = BASE_URL + '/api/plugin-serial/ota/flash-from-url';
+          body = { downloadUrl: fw.downloadUrl, port: fw.port, deviceId: FW_DEVICE_ID };
+        }
+        var r = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            downloadUrl: fw.downloadUrl,
-            port: fw.port,
-            deviceId: FW_DEVICE_ID
-          })
+          body: JSON.stringify(body)
         });
         if (!r.ok) throw new Error('server flash HTTP ' + r.status);
-        setFwStatus('muted', 'Uploading to AutoDustBoot…', true);
+        setFwStatus('muted', 'Uploading to AutoDustBoot via ' + (wireless ? 'wireless' : 'USB') + '…', true);
       } catch (e) {
         setFwStatus('err', 'Failed to start update: ' + (e.message || e));
         fw.updating = false;
@@ -1586,13 +1606,13 @@
 
     async function startFlashFromFile(file) {
       if (fw.updating) return;
-      // Ensure we have a port — a fresh refresh handles the "plugged in
-      // just now" case.
-      if (!fw.port) {
+      // Wireless path needs no USB port — skip the probe. USB path still
+      // needs a port; probe on demand if we don't have one cached.
+      if (!isWirelessAvailable() && !fw.port) {
         setFwStatus('muted', 'Locating AutoDustBoot on USB…', true);
         try {
           var d = await probeDevice();
-          if (!d.found) throw new Error('AutoDustBoot not detected on USB');
+          if (!d.found) throw new Error('AutoDustBoot not detected — plug in USB or pair the wireless dongle');
           fw.port = d.port; fw.current = d.match || '';
           showFwVersions(fw.current, fw.latest);
         } catch (e) {
@@ -1602,7 +1622,8 @@
       }
       fw.updating = true;
       updateFwButtons();
-      setFwStatus('muted', 'Uploading ' + file.name + '…', true);
+      var transport = isWirelessAvailable() ? 'wireless' : 'USB';
+      setFwStatus('muted', 'Uploading ' + file.name + ' via ' + transport + '…', true);
       setFwProgress(0, 'Uploading…');
       try { await postFlash(file); }
       catch (e) {
