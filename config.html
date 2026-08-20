@@ -617,6 +617,40 @@
     background: var(--color-accent-hover, #3a7bc8) !important;
   }
   .adb-fw-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Long-press progress overlay for the Update Firmware button.
+     Hidden by default; the JS toggles .adb-fw-charging to animate a
+     left→right fill over LONG_PRESS_MS. If the user releases early
+     the animation snaps back and the standard click fires; when it
+     finishes, the hidden file picker opens instead. */
+  #adb-fw-update {
+    position: relative;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  .adb-fw-update-label { position: relative; z-index: 1; }
+  .adb-fw-update-fill {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: 0;
+    background: rgba(255, 255, 255, 0.28);
+    pointer-events: none;
+    transition: width 60ms linear;
+  }
+  #adb-fw-update.adb-fw-charging .adb-fw-update-fill {
+    width: 100%;
+    transition: width 3s linear;
+  }
+  /* No-update state — looks disabled but still catches the long-press. */
+  #adb-fw-update.adb-fw-update--no-update {
+    opacity: 0.5;
+    filter: grayscale(0.5);
+  }
+  #adb-fw-update.adb-fw-update--no-update:hover:not(:disabled) {
+    filter: grayscale(0.5) brightness(1.02);
+  }
   .adb-fw-progress {
     margin-top: 12px;
     height: 6px; border-radius: 3px;
@@ -798,11 +832,13 @@
       <div class="adb-fw-body">
         <div class="adb-fw-info-row">
           <div id="adb-fw-status" class="adb-fw-status adb-fw-status--muted">
-            <span>Plug in via USB to check for updates.</span>
+            <span>Checking for updates…</span>
           </div>
           <div id="adb-fw-actions" class="adb-fw-actions" style="display:none">
-            <button type="button" id="adb-fw-update" class="adb-fw-action-btn adb-fw-action-btn--primary" style="display:none">Update Firmware</button>
-            <button type="button" id="adb-fw-flash-file" class="adb-fw-action-btn adb-fw-action-btn--secondary">Flash from file…</button>
+            <button type="button" id="adb-fw-update" class="adb-fw-action-btn adb-fw-action-btn--primary" style="display:none" title="Update to the latest release (hold 3 s to flash a local .bin)">
+              <span class="adb-fw-update-label">Update Firmware</span>
+              <span class="adb-fw-update-fill" aria-hidden="true"></span>
+            </button>
             <input type="file" id="adb-fw-file-input" accept=".bin" style="display:none">
           </div>
         </div>
@@ -999,6 +1035,7 @@
         else if (k === 'saved' || k === 'expand') wl.saved = parseInt(v, 10);  // firmware emits "expand="
         else if (k === 'state') wl.state = v;
         else if (k === 'homed') wl.homed = (v === '1' || v.toLowerCase() === 'true');
+        else if (k === 'ver') wl.version = v;   // AutoDustBoot v1.0.5+ broadcasts its FW_VERSION in status
       });
     }
 
@@ -1126,7 +1163,16 @@
           // Any message from this device implies it's paired (server tracks
           // it in _devices) — flip both known and connected true.
           wl.known = true; wl.connected = true; wl.lastSeenMs = 0;
+          var priorVer = wl.version;
           parsePayload(m.payload); renderWireless();
+          // If wireless just told us a new firmware version and the FW
+          // card is idle (no USB, not flashing), re-run the update
+          // check so the "current version" chip + button state reflect
+          // reality. Covers: (a) plugin opened before first status
+          // frame landed, (b) device rebooted onto a new version.
+          if (wl.version && wl.version !== priorVer && !fw.port && !fw.updating && !fw.checking) {
+            checkFirmware();
+          }
         });
         if (!offChg) offChg = window.ncSender.onServerEvent('dongle:device-changed', function(c) {
           if (!c || c.name !== DEVICE) return;
@@ -1134,9 +1180,17 @@
           // Connected=false when this device unpairs OR its link dies —
           // fetchDevice() gives us the real "still in the table?" answer,
           // so just re-fetch to keep known/connected consistent.
+          var wasConnected = wl.connected;
           wl.connected = !!c.connected;
           renderWireless();
           if (!c.connected) fetchDevice();
+          // Self-heal the Firmware Update card if wireless comes back after
+          // the initial idle probe already showed "connect the board" —
+          // typically after a wireless flash reboots the device. Only fires
+          // in the idle state so an in-progress flash isn't disturbed.
+          if (!wasConnected && wl.connected && !fw.checking && !fw.updating && !fw.port) {
+            checkFirmware();
+          }
         });
       } else if (!pollTimer) {
         pollTimer = setInterval(fetchDevice, 1000);
@@ -1366,9 +1420,20 @@
 
     function updateFwButtons() {
       document.getElementById('adb-fw-actions').style.display = (fw.checking || fw.updating) ? 'none' : '';
-      document.getElementById('adb-fw-update').style.display  = fw.updateAvailable ? '' : 'none';
-      document.getElementById('adb-fw-flash-file').disabled = fw.updating;
-      document.getElementById('adb-fw-update').disabled = fw.updating;
+      var btn = document.getElementById('adb-fw-update');
+      // Button is always visible so the hidden 3s long-press → file
+      // picker escape hatch is always reachable. Visually + click-wise
+      // it only "activates" when a real update is available. When
+      // there isn't one it renders greyed out with a helpful tooltip
+      // but still catches the long-press gesture.
+      btn.style.display = '';
+      btn.classList.toggle('adb-fw-update--no-update', !fw.updateAvailable);
+      btn.disabled = fw.updating;
+      btn.title = fw.updateAvailable
+        ? 'Update to v' + (fw.latest || '') + ' (hold 3 s to flash a local .bin)'
+        : (fw.current
+            ? 'Firmware is up to date (hold 3 s to flash a local .bin)'
+            : 'Hold 3 s to flash a local .bin');
     }
 
     function isNewerVersion(latest, current) {
@@ -1491,6 +1556,12 @@
       } else if (lic.licensed === false) {
         badge.classList.add('adb-fw-license--warn');
         label.textContent = 'Not activated';
+      } else if (isWirelessAvailable()) {
+        // No USB but wireless is live — we can flash, we just can't
+        // read the license over the radio (license query needs the USB
+        // serial handshake).
+        badge.classList.add('adb-fw-license--ok');
+        label.textContent = 'Wireless connected';
       } else {
         label.textContent = 'Board not detected';
       }
@@ -1510,12 +1581,52 @@
         fw.current = (detected && detected.found) ? (detected.match || '') : '';
         fw.port    = (detected && detected.found) ? (detected.port  || '') : '';
 
-        // Nothing on USB — short-circuit. Don't hit GitHub, don't leave
-        // the header badge stuck on "Checking…".
+        // Nothing on USB — short-circuit the license/version probe. If the
+        // board is reachable wirelessly, we can still fetch the latest
+        // release from GitHub. Current version comes from wl.version when
+        // the AutoDustBoot firmware is v1.0.5+ (which broadcasts ver= in
+        // its status frames); older firmware leaves it unknown and the
+        // button falls back to file-only via long-press.
         if (!fw.port) {
           lic.checked = true;   // "Board not detected" (not "Checking…")
           renderActivation();
-          setFwStatus('muted', 'Plug in via USB to check for updates.');
+          if (isWirelessAvailable()) {
+            try {
+              var release = await fetchLatestRelease();
+              if (release) {
+                fw.latest = release.latest;
+                fw.downloadUrl = release.downloadUrl;
+                fw.current = wl && wl.version ? wl.version : '';
+                if (fw.current) {
+                  // Firmware broadcasts ver= (v1.0.5+) — strict gating:
+                  // only enable button when latest is genuinely newer.
+                  fw.updateAvailable = isNewerVersion(fw.latest, fw.current);
+                  showFwVersions(fw.current, fw.latest);
+                  setFwStatus(fw.updateAvailable ? 'warn' : 'ok',
+                    fw.updateAvailable
+                      ? 'Update available: v' + fw.latest
+                      : 'Firmware is up to date (v' + fw.current + ')');
+                } else {
+                  // Firmware pre-dates the ver= broadcast — we can't
+                  // verify current. Still enable the button so the user
+                  // can update out of this state (worst case: reflashes
+                  // the same version, no harm done, then ver= starts
+                  // arriving and strict gating kicks in).
+                  fw.updateAvailable = true;
+                  showFwVersions('unknown', fw.latest);
+                  setFwStatus('muted',
+                    'Latest release: v' + fw.latest +
+                    ' — installed version will show after the first update to a version-aware firmware.');
+                }
+              } else {
+                setFwStatus('muted', '');
+              }
+            } catch (_) {
+              setFwStatus('muted', '');
+            }
+          } else {
+            setFwStatus('muted', 'Connect the board via USB or pair the wireless dongle to check for updates.');
+          }
           return;
         }
 
@@ -1544,13 +1655,26 @@
       }
     }
 
+    // Convention (see ncSender project memory): wireless always preferred
+    // over USB when available. postFlash + startUpdateFromRelease each pick
+    // the transport at call time — if the wireless link goes down between
+    // the version check and the click, the fallback to USB is silent.
+    function isWirelessAvailable() { return !!(wl && wl.connected); }
+
     async function postFlash(binaryBlob) {
-      if (!fw.port) { throw new Error('AutoDustBoot port not known — refresh first'); }
+      var wireless = isWirelessAvailable();
       var fd = new FormData();
       fd.append('file', binaryBlob, 'firmware.bin');
-      fd.append('port', fw.port);
       fd.append('deviceId', FW_DEVICE_ID);
-      var r = await fetch(BASE_URL + '/api/plugin-serial/ota/flash', { method: 'POST', body: fd });
+      var url;
+      if (wireless) {
+        url = BASE_URL + '/api/dongle/devices/' + DEVICE + '/ota';
+      } else {
+        if (!fw.port) { throw new Error('AutoDustBoot port not known — refresh first'); }
+        fd.append('port', fw.port);
+        url = BASE_URL + '/api/plugin-serial/ota/flash';
+      }
+      var r = await fetch(url, { method: 'POST', body: fd });
       if (!r.ok) throw new Error('flash start HTTP ' + r.status);
     }
 
@@ -1558,24 +1682,31 @@
       if (fw.updating) return;
       fw.updating = true;
       updateFwButtons();
-      setFwStatus('muted', 'Downloading v' + fw.latest + '…', true);
+      var wireless = isWirelessAvailable();
+      setFwStatus('muted',
+        'Downloading v' + fw.latest + ' — flashing over ' + (wireless ? 'wireless' : 'USB') + '…',
+        true);
       setFwProgress(0, 'Downloading…');
       try {
-        // Delegate the download to the server. GitHub release-asset URLs don't
-        // return CORS headers, so a browser-side fetch fails with 'Failed to
-        // fetch'. The server has no such restriction and streams the bytes
-        // straight into the OTA flash it kicks off next.
-        var r = await fetch(BASE_URL + '/api/plugin-serial/ota/flash-from-url', {
+        var body, url;
+        if (wireless) {
+          // Wireless: server streams over ESP-NOW via the dongle. No USB
+          // port needed — the AutoDustBoot receives OTA frames on-radio.
+          url = BASE_URL + '/api/dongle/devices/' + DEVICE + '/ota-from-url';
+          body = { downloadUrl: fw.downloadUrl, deviceId: FW_DEVICE_ID };
+        } else {
+          // USB: server bypasses browser CORS on GitHub release-asset URLs
+          // and pushes bytes to the AutoDustBoot's USB CDC serial.
+          url = BASE_URL + '/api/plugin-serial/ota/flash-from-url';
+          body = { downloadUrl: fw.downloadUrl, port: fw.port, deviceId: FW_DEVICE_ID };
+        }
+        var r = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            downloadUrl: fw.downloadUrl,
-            port: fw.port,
-            deviceId: FW_DEVICE_ID
-          })
+          body: JSON.stringify(body)
         });
         if (!r.ok) throw new Error('server flash HTTP ' + r.status);
-        setFwStatus('muted', 'Uploading to AutoDustBoot…', true);
+        setFwStatus('muted', 'Uploading to AutoDustBoot via ' + (wireless ? 'wireless' : 'USB') + '…', true);
       } catch (e) {
         setFwStatus('err', 'Failed to start update: ' + (e.message || e));
         fw.updating = false;
@@ -1586,13 +1717,13 @@
 
     async function startFlashFromFile(file) {
       if (fw.updating) return;
-      // Ensure we have a port — a fresh refresh handles the "plugged in
-      // just now" case.
-      if (!fw.port) {
+      // Wireless path needs no USB port — skip the probe. USB path still
+      // needs a port; probe on demand if we don't have one cached.
+      if (!isWirelessAvailable() && !fw.port) {
         setFwStatus('muted', 'Locating AutoDustBoot on USB…', true);
         try {
           var d = await probeDevice();
-          if (!d.found) throw new Error('AutoDustBoot not detected on USB');
+          if (!d.found) throw new Error('AutoDustBoot not detected — plug in USB or pair the wireless dongle');
           fw.port = d.port; fw.current = d.match || '';
           showFwVersions(fw.current, fw.latest);
         } catch (e) {
@@ -1602,7 +1733,8 @@
       }
       fw.updating = true;
       updateFwButtons();
-      setFwStatus('muted', 'Uploading ' + file.name + '…', true);
+      var transport = isWirelessAvailable() ? 'wireless' : 'USB';
+      setFwStatus('muted', 'Uploading ' + file.name + ' via ' + transport + '…', true);
       setFwProgress(0, 'Uploading…');
       try { await postFlash(file); }
       catch (e) {
@@ -1704,15 +1836,68 @@
     // No manual refresh button — the checkFirmware call is fired every time
     // the wireless panel becomes active (see setMode below). This way the
     // dialog always shows fresh state without the user having to click ⟳.
-    document.getElementById('adb-fw-update').addEventListener('click', startUpdateFromRelease);
-    document.getElementById('adb-fw-flash-file').addEventListener('click', function() {
-      document.getElementById('adb-fw-file-input').click();
-    });
-    document.getElementById('adb-fw-file-input').addEventListener('change', function(e) {
-      var f = e.target.files && e.target.files[0];
-      if (f) startFlashFromFile(f);
-      e.target.value = '';
-    });
+    // "Update Firmware" is the only visible OTA action. A 3-second
+    // long-press instead opens the hidden .bin file picker — a power-
+    // user escape hatch for locally-built firmware (matches the
+    // "hidden gesture" pattern users already know from the physical
+    // RETRACT+EXTEND long-press to re-pair).
+    (function wireUpdateButton() {
+      var LONG_PRESS_MS = 3000;
+      var btn = document.getElementById('adb-fw-update');
+      var fileInput = document.getElementById('adb-fw-file-input');
+      var lpTimer = null;
+      var lpFired = false;
+
+      function cancelLp() {
+        if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+        btn.classList.remove('adb-fw-charging');
+      }
+      function armLp(e) {
+        if (btn.disabled) return;
+        lpFired = false;
+        // Force reflow so the "charging" transition restarts from 0.
+        btn.classList.remove('adb-fw-charging');
+        void btn.offsetWidth;
+        btn.classList.add('adb-fw-charging');
+        lpTimer = setTimeout(function() {
+          lpFired = true;
+          lpTimer = null;
+          btn.classList.remove('adb-fw-charging');
+          // Suppress the pending click so the release doesn't ALSO
+          // trigger startUpdateFromRelease. The click handler below
+          // checks lpFired and no-ops when set.
+          fileInput.click();
+        }, LONG_PRESS_MS);
+      }
+
+      btn.addEventListener('pointerdown', armLp);
+      // Any of these ends the gesture short of the 3 s threshold.
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) {
+        btn.addEventListener(ev, cancelLp);
+      });
+
+      // Normal click = OTA update from GitHub release. If the long-
+      // press already fired, swallow the click event to avoid running
+      // both actions on release. If no update is available, the click
+      // is a no-op — the button is only for the long-press file-flash
+      // escape hatch in that state.
+      btn.addEventListener('click', function(e) {
+        if (lpFired) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          lpFired = false;
+          return;
+        }
+        if (!fw.updateAvailable) return;
+        startUpdateFromRelease();
+      });
+
+      fileInput.addEventListener('change', function(e) {
+        var f = e.target.files && e.target.files[0];
+        if (f) startFlashFromFile(f);
+        e.target.value = '';
+      });
+    })();
 
     // Live progress via WebSocket. The generic `plugin-ota:*` events carry
     // a deviceId — we only react to our own.
@@ -1739,12 +1924,18 @@
         // them overlap horizontally.
         setFwProgress(100, 'Done. Board rebooting…');
         setFwStatus('ok', 'Firmware updated successfully. Board is rebooting.');
+        // The reboot itself + WiFi/ESP-NOW rejoin takes ~5–8 s on the
+        // AutoDustBoot; re-checking too early sees a dead device and
+        // prints the "connect the board" fallback. 10 s is comfortably
+        // past the reconnect window without keeping the button hidden
+        // long enough to feel broken. (The wireless-changed handler
+        // below also self-heals if reconnect races the re-check.)
         setTimeout(function() {
           fw.updating = false;
           hideFwProgress();
           updateFwButtons();
-          checkFirmware();   // re-probe to confirm the new version
-        }, 2500);
+          checkFirmware();
+        }, 10000);
       });
     }
 
