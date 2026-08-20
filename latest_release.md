@@ -1,5 +1,7 @@
 ## What's Changed
 
+### ✨ New Features
+- Firmware updates can now be sent over the wireless dongle, with automatic fallback to USB when no dongle is connected
+
 ### 🔧 Improvements
-- The dust boot now auto-expands only while a job is actually running, so it stays put during manual jogging and setup moves
-- Machine positioning moves such as G53, G28, and G30 no longer trigger the arm chain, preventing unwanted dust boot movement during homing and tool changes
+- The Firmware Update card now shows which connection will be used for the update
