@@ -1,7 +1,10 @@
 ## What's Changed
 
 ### ✨ New Features
-- Firmware updates can now be sent over the wireless dongle, with automatic fallback to USB when no dongle is connected
+- Added a telemetry stat grid that displays dust boot status at a glance
 
 ### 🔧 Improvements
-- The Firmware Update card now shows which connection will be used for the update
+- Redesigned the plugin interface as a sidebar tab for quicker access
+- Rewrote setting descriptions in plain language so options are easier to understand
+- Wireless status now stays accurate and recovers gracefully when the connection is interrupted
+- General visual polish across the plugin interface
