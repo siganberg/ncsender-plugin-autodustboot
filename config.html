@@ -270,6 +270,25 @@
     max-width: 60ch;
     margin: 6px 0 0;
   }
+  .adb-callout {
+    display: flex; align-items: flex-start; gap: 10px;
+    margin: 12px 0 4px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-accent, #4a90e2) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-accent, #4a90e2) 30%, transparent);
+    font-size: 0.86rem;
+    line-height: 1.5;
+    color: var(--color-text-primary, #e5e7eb);
+  }
+  .adb-callout svg { flex-shrink: 0; width: 18px; height: 18px; margin-top: 1px; color: var(--color-accent, #4a90e2); }
+  .adb-callout code {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.82rem;
+  }
   .adb-section-title {
     font-size: 0.72rem;
     font-weight: 700;
@@ -349,7 +368,7 @@
   .adb-toggle-switch input:checked + .adb-toggle-slider { background-color: var(--color-accent, #4a90e2); }
   .adb-toggle-switch input:checked + .adb-toggle-slider:before { transform: translateX(22px); }
 
-  .adb-monaco-container { height: 300px; border: 1px solid var(--color-border, #ddd); border-radius: 4px; overflow: hidden; }
+  .adb-monaco-container { height: 320px; border: 1px solid var(--color-border, #ddd); border-radius: 4px; overflow: hidden; }
 
   /* Wireless panel — status card, meta, control cluster, activation, firmware. */
   .adb-status-card {
@@ -482,7 +501,7 @@
     user-select: none;
     transition: background 0.12s, color 0.12s;
   }
-  .adb-jog-center svg { width: 14px; height: 14px; opacity: 0.85; }
+  .adb-jog-center svg { width: 20px; height: 20px; opacity: 0.85; }
   .adb-jog-center:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent, #4a90e2) 8%, transparent); }
   .adb-jog-center:active:not(:disabled) { background: var(--color-accent, #4a90e2); color: #fff; }
   .adb-jog-center:disabled,
@@ -505,7 +524,9 @@
     border-radius: 12px;
     background: var(--color-surface-muted, #fafafa);
     color: var(--color-text-primary, #222);
-    font-size: 0.88rem; font-weight: 500;
+    font-size: 0.78rem; font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     cursor: pointer; user-select: none;
     transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
   }
@@ -847,6 +868,16 @@
 
         <!-- ==== WIRED (pneumatic) ==== -->
         <div id="adb-wired">
+          <div class="adb-callout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <div>
+              Wire your relay's signal to one of the CNC controller outputs — <b>Flood</b> (<code>M8</code>/<code>M9</code>) or <b>Mist</b> (<code>M7</code>/<code>M9</code>) work well. The G-code sequences below toggle that output to raise and lower the dust boot.
+            </div>
+          </div>
           <p class="adb-help">
             Retract runs before homing (and, if enabled below, before rapid moves). Expand runs after the sequence completes.
             Anything valid in your controller's G-code is fair game — use dwell commands (<code>G4</code>) to let the boot finish its stroke before motion continues.
@@ -925,19 +956,17 @@
             <div class="adb-action-grid">
               <button type="button" class="adb-action-btn adb-ctl" data-send="goto:0" title="Return to home (retract)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="4 14 4 20 10 20"/>
-                  <polyline points="20 10 20 4 14 4"/>
-                  <line x1="14" y1="10" x2="21" y2="3"/>
-                  <line x1="3" y1="21" x2="10" y2="14"/>
+                  <line x1="4" y1="4" x2="20" y2="4"/>
+                  <line x1="12" y1="8" x2="12" y2="20"/>
+                  <polyline points="7 13 12 8 17 13"/>
                 </svg>
                 <span>Retract</span>
               </button>
               <button type="button" class="adb-action-btn adb-ctl" id="adb-btnExpand" title="Move to the saved expand position">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="15 3 21 3 21 9"/>
-                  <polyline points="9 21 3 21 3 15"/>
-                  <line x1="21" y1="3" x2="14" y2="10"/>
-                  <line x1="3" y1="21" x2="10" y2="14"/>
+                  <line x1="12" y1="4" x2="12" y2="16"/>
+                  <polyline points="7 11 12 16 17 11"/>
+                  <line x1="4" y1="20" x2="20" y2="20"/>
                 </svg>
                 <span>Expand</span>
               </button>
@@ -1254,6 +1283,7 @@
 
     function renderWireless() {
       var card = document.getElementById('adb-statusCard');
+      if (!card) { stopWirelessLive(); return; }
       card.classList.toggle('connected', !!wl.connected);
 
       var title, sub;
@@ -1359,6 +1389,7 @@
       if (window.ncSender && typeof window.ncSender.onServerEvent === 'function') {
         if (!offMsg) offMsg = window.ncSender.onServerEvent('dongle:device-message', function(m) {
           if (!m || m.name !== DEVICE) return;
+          if (wl._disconnectTimer) { clearTimeout(wl._disconnectTimer); wl._disconnectTimer = null; }
           wl.known = true; wl.connected = true; wl.lastSeenMs = 0;
           var priorVer = wl.version;
           parsePayload(m.payload); renderWireless();
@@ -1369,11 +1400,19 @@
         if (!offChg) offChg = window.ncSender.onServerEvent('dongle:device-changed', function(c) {
           if (!c || c.name !== DEVICE) return;
           var wasConnected = wl.connected;
-          wl.connected = !!c.connected;
-          renderWireless();
-          if (!c.connected) fetchDevice();
-          if (!wasConnected && wl.connected && !fw.checking && !fw.updating && !fw.port) {
-            checkFirmware();
+          if (c.connected) {
+            if (wl._disconnectTimer) { clearTimeout(wl._disconnectTimer); wl._disconnectTimer = null; }
+            wl.connected = true;
+            renderWireless();
+            if (!wasConnected && !fw.checking && !fw.updating && !fw.port) checkFirmware();
+          } else {
+            if (wl._disconnectTimer) clearTimeout(wl._disconnectTimer);
+            wl._disconnectTimer = setTimeout(function() {
+              wl._disconnectTimer = null;
+              wl.connected = false;
+              renderWireless();
+              fetchDevice();
+            }, 4000);
           }
         });
       } else if (!pollTimer) {
@@ -1687,6 +1726,7 @@
 
     async function checkFirmware() {
       if (fw.checking || fw.updating) return;
+      if (!document.getElementById('adb-statusCard')) { stopWirelessLive(); return; }
       fw.checking = true;
       updateFwButtons();
       setFwStatus('muted', 'Checking for updates…', true);
