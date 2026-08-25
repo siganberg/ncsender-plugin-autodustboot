@@ -268,7 +268,15 @@ const buildInitialConfig = function(raw) {
     expandCommand: raw.expandCommand || 'M8',
     retractOnHome: raw.retractOnHome !== undefined ? raw.retractOnHome : true,
     retractOnRapidMove: raw.retractOnRapidMove !== undefined ? raw.retractOnRapidMove : true,
-    showAddedGCode: raw.showAddedGCode !== undefined ? raw.showAddedGCode : false
+    showAddedGCode: raw.showAddedGCode !== undefined ? raw.showAddedGCode : false,
+    // Physical extension distance (mm) reported by the device firmware.
+    // Config UI uses it to clamp the mm readout and slider bounds; the
+    // plugin's runtime doesn't send it anywhere. Default matches shipped
+    // firmware (92 mm).
+    maxTravelMm: (function() {
+      var v = Number(raw.maxTravelMm);
+      return (isFinite(v) && v >= 10) ? v : 92;
+    })()
   };
 };
 
@@ -487,20 +495,18 @@ function onBeforeCommand(commands, context, settings) {
     }
   }
 
-  // Wireless mode has no legacy client/macro-only retract-on-home/G0 to
-  // consider — the runtime detection above already covered everything.
-  if (settings.mode === 'wireless') {
-    return commands;
-  }
-
-  // Handle $H home command
+  // Handle $H home command (fires for both wired and wireless — wireless
+  // mode used to short-circuit here, which broke Retract-on-Home whenever
+  // the operator ran a manual $H outside a job).
   var homeIndex = commands.findIndex(function(cmd) {
     return cmd.isOriginal && cmd.command.trim().toUpperCase().startsWith('$H');
   });
 
   if (homeIndex !== -1 && retractOnHome) {
-    var homeSequence = createCommandSequence(retractCommand);
-    commands.splice(homeIndex, 0, homeSequence);
+    var homeRetract = emitRetract();
+    if (homeRetract.length > 0) {
+      commands.splice.apply(commands, [homeIndex, 0].concat(homeRetract));
+    }
     return commands;
   }
 
@@ -513,8 +519,10 @@ function onBeforeCommand(commands, context, settings) {
     });
 
     if (g0Index !== -1) {
-      var g0Sequence = createCommandSequence(retractCommand);
-      commands.splice(g0Index, 0, g0Sequence);
+      var g0Retract = emitRetract();
+      if (g0Retract.length > 0) {
+        commands.splice.apply(commands, [g0Index, 0].concat(g0Retract));
+      }
       return commands;
     }
   }

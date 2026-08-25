@@ -1039,6 +1039,20 @@
         </div>
 
         <div class="adb-option-block">
+          <h3 class="adb-option-title">Max Travel</h3>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="number" id="adb-maxTravelMm" min="10" max="500" step="1"
+                   style="width:90px;padding:6px 8px;font-size:14px;background:var(--color-surface,#1a1e26);
+                          color:var(--color-text-primary,#e6ecf2);border:1px solid var(--color-border,#2f3743);
+                          border-radius:6px;">
+            <span style="color:var(--color-text-secondary,#93a2b4);">mm</span>
+          </div>
+          <p class="adb-option-body">
+            Physical extension distance of your AutoDustBoot, set by the device firmware. Adjust here if you're running a modified firmware with a different limit — this only affects the position readouts and slider bounds in this dialog. Default is 92 mm.
+          </p>
+        </div>
+
+        <div class="adb-option-block">
           <h3 class="adb-option-title">Show in Terminal</h3>
           <label class="adb-toggle-switch">
             <input type="checkbox" id="adb-showAddedGCode">
@@ -1135,7 +1149,9 @@
     // then raised to 92 mm => firmware MAX_TRAVEL = 46524 counts. Keep COUNTS_PER_MM,
     // TRAVEL_MM and the firmware MAX_TRAVEL in sync when the bottom limit changes.
     var COUNTS_PER_MM = 505.7;
-    var TRAVEL_MM = 92;
+    var TRAVEL_MM = 92;              // seeded from saved settings.maxTravelMm at load
+    var DEFAULT_TRAVEL_MM = 92;
+    var lastSavedTravelMm = 92;      // for save-time change detection
     var RETRACT_TOL_MM = 0.3;   // within this of 0 -> treat as fully retracted
 
     var retractEditor = null;
@@ -1462,6 +1478,13 @@
       document.getElementById('adb-retractOnHome').checked = settings.retractOnHome !== undefined ? settings.retractOnHome : true;
       document.getElementById('adb-retractOnRapidMove').checked = settings.retractOnRapidMove !== undefined ? settings.retractOnRapidMove : true;
       document.getElementById('adb-showAddedGCode').checked = settings.showAddedGCode !== undefined ? settings.showAddedGCode : false;
+      // Max Travel — clamps the mm readout in this dialog AND is pushed to
+      // the device firmware ($MAXTRAVEL:<mm>, persisted to NVS) so the
+      // physical soft-limit tracks the setting. Default 92 mm.
+      var savedTravel = Number(settings.maxTravelMm);
+      TRAVEL_MM = (isFinite(savedTravel) && savedTravel >= 10) ? savedTravel : DEFAULT_TRAVEL_MM;
+      lastSavedTravelMm = TRAVEL_MM;
+      document.getElementById('adb-maxTravelMm').value = TRAVEL_MM;
       setMode(settings.mode === 'wireless' ? 'wireless' : 'wired');
     }
 
@@ -1509,13 +1532,39 @@
         expandCommand: expandEditor ? expandEditor.getValue().trim() : DEFAULT_EXPAND,
         retractOnHome: document.getElementById('adb-retractOnHome').checked,
         retractOnRapidMove: document.getElementById('adb-retractOnRapidMove').checked,
-        showAddedGCode: document.getElementById('adb-showAddedGCode').checked
+        showAddedGCode: document.getElementById('adb-showAddedGCode').checked,
+        maxTravelMm: (function() {
+          var v = Number(document.getElementById('adb-maxTravelMm').value);
+          return (isFinite(v) && v >= 10) ? v : DEFAULT_TRAVEL_MM;
+        })()
       };
+      // If max travel changed, push the new soft-limit to firmware.
+      // `$MAXTRAVEL:<mm>` persists to NVS so it survives power-cycle
+      // without needing a re-flash. Fire-and-forget — we don't gate on
+      // wl.connected because the Connections tab may not have fetched
+      // the status yet; the server-side /send endpoint is a no-op if
+      // the device isn't reachable.
+      if (settings.maxTravelMm !== lastSavedTravelMm) {
+        console.log('[adb] pushing $MAXTRAVEL:' + settings.maxTravelMm + ' to device');
+        send('$MAXTRAVEL:' + settings.maxTravelMm);
+        lastSavedTravelMm = settings.maxTravelMm;
+      }
+      var saveBtn = document.getElementById('adb-saveBtn');
+      var origLabel = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
       fetch(BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
       })
-        .then(function() { window.postMessage({ type: 'close-plugin-dialog' }, '*'); })
-        .catch(function(error) { console.error('Failed to save settings:', error); });
+        .then(function() {
+          saveBtn.textContent = 'Saved';
+          setTimeout(function() { saveBtn.textContent = origLabel; saveBtn.disabled = false; }, 1000);
+        })
+        .catch(function(error) {
+          console.error('Failed to save settings:', error);
+          saveBtn.textContent = 'Save failed';
+          setTimeout(function() { saveBtn.textContent = origLabel; saveBtn.disabled = false; }, 2000);
+        });
     }
 
     // Pairing actions
