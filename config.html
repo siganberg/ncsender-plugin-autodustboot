@@ -767,7 +767,7 @@
   }
   #adb-fw-update.adb-fw-charging .adb-fw-update-fill {
     width: 100%;
-    transition: width 3s linear;
+    transition: width 1s linear;
   }
   #adb-fw-update.adb-fw-update--no-update { opacity: 0.5; filter: grayscale(0.5); }
   #adb-fw-update.adb-fw-update--no-update:hover:not(:disabled) { filter: grayscale(0.5) brightness(1.02); }
@@ -780,7 +780,7 @@
   .adb-fw-progress-bar {
     height: 100%; width: 0%;
     background: var(--color-accent, #4a90e2);
-    transition: width 0.25s ease;
+    transition: width 0.25s linear;
   }
   .adb-fw-progress-label {
     display: flex; justify-content: space-between;
@@ -1100,7 +1100,7 @@
                 <span>Checking for updates…</span>
               </div>
               <div id="adb-fw-actions" class="adb-fw-actions" style="display:none">
-                <button type="button" id="adb-fw-update" class="adb-fw-action-btn adb-fw-action-btn--primary" style="display:none" title="Update to the latest release (hold 3 s to flash a local .bin)">
+                <button type="button" id="adb-fw-update" class="adb-fw-action-btn adb-fw-action-btn--primary" style="display:none" title="Update to the latest release (hold 1 s to flash a local .bin)">
                   <span class="adb-fw-update-label">Update Firmware</span>
                   <span class="adb-fw-update-fill" aria-hidden="true"></span>
                 </button>
@@ -1624,6 +1624,9 @@
     var FW_PROBE_REGEX   = '^\\$VERSION:(\\d+\\.\\d+\\.\\d+)$';
 
     var fw = { checking: false, updating: false, current: '', latest: '', updateAvailable: false, downloadUrl: '', port: '' };
+    // Generous: a GitHub asset over a slow link. The ramp only has to look
+    // alive — the first real flash event takes over wherever it has got to.
+    var FW_DOWNLOAD_RAMP_MS = 8000;
     var lic = { checked: false, licensed: null, deviceId: '', activating: false };
 
     function setFwStatus(kind, text, showSpinner) {
@@ -1645,25 +1648,99 @@
 
     function showFwVersions(_current, _latest) { /* versions now embedded in status text */ }
 
+    // ---- Progress bar ----------------------------------------------------
+    // The bar is strictly monotonic and every move is one continuous linear
+    // transition the browser interpolates — stepping the width per event
+    // against an ease transition restarted the easing each time and made the
+    // fill lurch. The % label is read back off the RENDERED width so the
+    // number always matches what's on screen.
+    //
+    // Release updates have two phases: the server downloads the .bin (no
+    // progress events at all — the bar used to sit dead at 0 %) and then
+    // flashes. So the download glides through a reserved head band and real
+    // flash progress is mapped into the remainder; the bar never jumps back.
+    var fwPct = 0;      // last committed target, in bar space
+    var fwBase = 0;     // start of the band real progress maps into
+    var fwSpan = 100;   // width of that band
+    var fwLabelTimer = null;
+
+    function fwBarEl() { return document.getElementById('adb-fw-progress-bar'); }
+    // Rendered width as a percentage, or null when it can't be measured (the
+    // Firmware tab is hidden) — callers must not act on a bogus 0 there.
+    function fwBarPct() {
+      var bar = fwBarEl(); if (!bar) return null;
+      var track = bar.parentElement; if (!track) return null;
+      var tw = track.getBoundingClientRect().width;
+      if (!tw) return null;
+      return Math.max(0, Math.min(100, (bar.getBoundingClientRect().width / tw) * 100));
+    }
+    function syncFwPctLabel() {
+      var at = fwBarPct(); if (at === null) return;
+      document.getElementById('adb-fw-progress-pct').textContent = Math.round(at) + '%';
+    }
+    // Pin the bar where it is actually rendering, so the next transition
+    // starts from there instead of snapping.
+    function freezeFwBar() {
+      var bar = fwBarEl(); if (!bar) return;
+      var at = fwBarPct(); if (at === null) return;
+      bar.style.transition = 'none';
+      bar.style.width = at + '%';
+      void bar.offsetWidth;
+    }
+    function beginFwProgress(msg, base, span) {
+      var wrap = document.getElementById('adb-fw-progress-wrap');
+      wrap.style.display = '';
+      fwPct = 0;
+      fwBase = base || 0;
+      fwSpan = (span == null) ? 100 : span;
+      var bar = fwBarEl();
+      if (bar) { bar.style.transition = 'none'; bar.style.width = '0%'; void bar.offsetWidth; }
+      document.getElementById('adb-fw-progress-msg').textContent = msg || '';
+      document.getElementById('adb-fw-progress-pct').textContent = '0%';
+      if (!fwLabelTimer) fwLabelTimer = setInterval(syncFwPctLabel, 100);
+    }
+    // Glide to `pct` (bar space) over `durationMs` in one transition.
+    function rampFwProgress(pct, durationMs, msg) {
+      var bar = fwBarEl(); if (!bar || pct <= fwPct) return;
+      freezeFwBar();
+      fwPct = pct;
+      bar.style.transition = 'width ' + durationMs + 'ms linear';
+      bar.style.width = pct + '%';
+      if (msg) document.getElementById('adb-fw-progress-msg').textContent = msg;
+    }
+    // `pct` is flash progress (0-100), mapped into the band set at begin.
     function setFwProgress(pct, msg) {
       var wrap = document.getElementById('adb-fw-progress-wrap');
       wrap.style.display = '';
-      document.getElementById('adb-fw-progress-bar').style.width = pct + '%';
-      document.getElementById('adb-fw-progress-pct').textContent = pct + '%';
+      var mapped = fwBase + (Math.max(0, Math.min(100, pct)) * fwSpan) / 100;
+      mapped = Math.max(0, Math.min(100, mapped));
+      if (mapped < fwPct) return;   // never snap backwards
+      freezeFwBar();
+      fwPct = mapped;
+      var bar = fwBarEl();
+      bar.style.transition = 'width 250ms linear';
+      bar.style.width = mapped + '%';
       if (msg) document.getElementById('adb-fw-progress-msg').textContent = msg;
+      document.getElementById('adb-fw-progress-pct').textContent = Math.round(mapped) + '%';
     }
-    function hideFwProgress() { document.getElementById('adb-fw-progress-wrap').style.display = 'none'; }
+    function hideFwProgress() {
+      if (fwLabelTimer) { clearInterval(fwLabelTimer); fwLabelTimer = null; }
+      document.getElementById('adb-fw-progress-wrap').style.display = 'none';
+      fwPct = 0; fwBase = 0; fwSpan = 100;
+    }
 
     function updateFwButtons() {
-      document.getElementById('adb-fw-actions').style.display = (fw.checking || fw.updating) ? 'none' : '';
+      // The row stays in the layout throughout — hiding it while checking or
+      // flashing made the row, and the progress bar under it, jump.
+      document.getElementById('adb-fw-actions').style.display = '';
       var btn = document.getElementById('adb-fw-update');
       btn.style.display = '';
       btn.classList.toggle('adb-fw-update--no-update', !fw.updateAvailable);
       btn.disabled = fw.updating;
-      btn.title = fw.updateAvailable
-        ? 'Update to v' + (fw.latest || '') + ' (hold 3 s to flash a local .bin)'
+      btn.title = fw.updating ? 'Update in progress' : fw.updateAvailable
+        ? 'Update to v' + (fw.latest || '') + ' (hold 1 s to flash a local .bin)'
         : (fw.current
-            ? 'Firmware is up to date (hold 3 s to flash a local .bin)'
+            ? 'Firmware is up to date (hold 1 s to flash a local .bin)'
             : 'Hold 3 s to flash a local .bin');
     }
 
@@ -1871,7 +1948,10 @@
       setFwStatus('muted',
         'Downloading v' + fw.latest + ' — flashing over ' + (wireless ? 'wireless' : 'USB') + '…',
         true);
-      setFwProgress(0, 'Downloading…');
+      // Head band 0-12 % covers the server-side download, which emits no
+      // progress events; flash progress then fills 12-100 %.
+      beginFwProgress('Downloading…', 12, 88);
+      rampFwProgress(12, FW_DOWNLOAD_RAMP_MS, 'Downloading…');
       try {
         var body, url;
         if (wireless) {
@@ -1914,7 +1994,7 @@
       updateFwButtons();
       var transport = isWirelessAvailable() ? 'wireless' : 'USB';
       setFwStatus('muted', 'Uploading ' + file.name + ' via ' + transport + '…', true);
-      setFwProgress(0, 'Uploading…');
+      beginFwProgress('Uploading…', 0, 100);
       try { await postFlash(file); }
       catch (e) {
         setFwStatus('err', 'Failed to start update: ' + (e.message || e));
@@ -2004,7 +2084,7 @@
 
     // Update button: click = OTA from GitHub; 3s hold = local file picker.
     (function wireUpdateButton() {
-      var LONG_PRESS_MS = 3000;
+      var LONG_PRESS_MS = 1000;
       var btn = document.getElementById('adb-fw-update');
       var fileInput = document.getElementById('adb-fw-file-input');
       var lpTimer = null;
