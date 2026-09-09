@@ -433,7 +433,6 @@
   .adb-meta-item.is-good .adb-meta-value { color: #22c55e; }
   .adb-meta-item.is-warn .adb-meta-value { color: #f59e0b; }
   .adb-meta-sep { display: none; }
-  .adb-status-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
   /* Control card — jog pill on the left, action grid on the right. */
   .adb-control-card {
@@ -555,76 +554,6 @@
   }
   .adb-action-btn:disabled svg,
   .adb-action-btn:disabled:hover svg { opacity: 0.85; color: inherit !important; }
-
-  /* Pair / Unpair */
-  .adb-pair-btn, .adb-unpair-btn {
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 0.82rem; font-weight: 500;
-    cursor: pointer;
-    transition: filter 0.15s, background 0.15s;
-    white-space: nowrap;
-  }
-  .adb-pair-btn {
-    background: var(--color-accent, #4a90e2);
-    border: 1px solid var(--color-accent, #4a90e2);
-    color: #fff;
-  }
-  .adb-pair-btn:hover:not(:disabled) { filter: brightness(1.08); }
-  .adb-pair-btn:disabled { opacity: 0.6; cursor: default; }
-  .adb-unpair-btn {
-    background: #ef4444 !important;
-    border: 1px solid #ef4444 !important;
-    color: #fff !important;
-  }
-  .adb-unpair-btn:hover:not(:disabled) { filter: brightness(1.08); background: #dc2626 !important; }
-  .adb-unpair-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  /* Confirm modal (viewport-fixed). */
-  .adb-confirm-backdrop {
-    position: fixed; inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 10000;
-  }
-  .adb-confirm-panel {
-    display: flex; flex-direction: column; gap: 16px;
-    max-width: 480px; width: calc(100% - 40px);
-    background: var(--color-surface, #1a1d24);
-    border: 1px solid var(--color-border, rgba(255,255,255,0.08));
-    border-radius: 16px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-    padding: 28px 32px;
-  }
-  .adb-confirm-title { margin: 0; font-size: 1.25rem; font-weight: 600; color: var(--color-text-primary, #e5e7eb); }
-  .adb-confirm-body { margin: 0; font-size: 0.95rem; line-height: 1.5; color: var(--color-text-secondary, #94a3b8); }
-  .adb-confirm-actions { display: flex; justify-content: center; gap: 12px; margin-top: 6px; }
-  .adb-confirm-btn {
-    padding: 10px 24px;
-    border-radius: 6px;
-    font-size: 0.95rem; font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: none;
-  }
-  .adb-confirm-btn--cancel {
-    background: var(--color-surface-muted, #262a33) !important;
-    color: var(--color-text-primary, #e5e7eb) !important;
-    border: 1px solid var(--color-border, rgba(255,255,255,0.08)) !important;
-  }
-  .adb-confirm-btn--cancel:hover {
-    background: var(--color-surface, #1a1d24) !important;
-    border-color: var(--color-accent, #4a90e2) !important;
-  }
-  .adb-confirm-btn--danger {
-    background: linear-gradient(135deg, #ff6b6b, rgba(255, 107, 107, 0.8)) !important;
-    color: #fff !important;
-  }
-  .adb-confirm-btn--danger:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(255, 107, 107, 0.3);
-  }
-
 </style>
 
 <div class="adb-wrapper">
@@ -727,10 +656,6 @@
             <div class="adb-status-body">
               <div id="adb-statusTitle" class="adb-status-title">Checking…</div>
               <div id="adb-statusSub" class="adb-status-sub">Contacting the AutoDustBoot through the adapter…</div>
-            </div>
-            <div class="adb-status-right">
-              <button type="button" id="adb-pairBtn" class="adb-pair-btn" style="display:none">Pair New Device</button>
-              <button type="button" id="adb-unpairBtn" class="adb-unpair-btn" style="display:none">Unpair Device</button>
             </div>
           </div>
 
@@ -869,19 +794,6 @@
     </section>
 
 
-    <!-- Unpair confirmation — viewport-fixed backdrop, lives at the wrapper root. -->
-    <div id="adb-unpair-confirm" class="adb-confirm-backdrop" style="display:none">
-      <div class="adb-confirm-panel">
-        <h3 class="adb-confirm-title">Unpair Device</h3>
-        <p class="adb-confirm-body">
-          Are you sure you want to unpair this AutoDustBoot? You will need to re-pair it before it can receive wireless commands again.
-        </p>
-        <div class="adb-confirm-actions">
-          <button type="button" class="adb-confirm-btn adb-confirm-btn--cancel" id="adb-unpair-cancel">Cancel</button>
-          <button type="button" class="adb-confirm-btn adb-confirm-btn--danger" id="adb-unpair-confirm-btn">Unpair</button>
-        </div>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -1055,7 +967,7 @@
         sub = 'Paired but currently offline — power on the AutoDustBoot to reconnect.';
       } else {
         title = 'Not paired';
-        sub = 'Power on the AutoDustBoot, then click Pair New Device.';
+        sub = 'Power on the AutoDustBoot, then pair it from the Accessories dialog.';
       }
       document.getElementById('adb-statusTitle').textContent = title;
       document.getElementById('adb-statusSub').textContent = sub;
@@ -1070,9 +982,6 @@
       homedItem.classList.toggle('is-warn', wl.homed === false);
       var lock = !wl.connected || wl.state === 'homing';
       document.querySelectorAll('#adb-wireless .adb-ctl, #adb-wireless .adb-jog-arrow').forEach(function(b) { b.disabled = lock; });
-
-      document.getElementById('adb-pairBtn').style.display   = wl.known ? 'none' : '';
-      document.getElementById('adb-unpairBtn').style.display = wl.known ? '' : 'none';
     }
 
     function send(payload) {
@@ -1299,52 +1208,6 @@
           setTimeout(function() { saveBtn.textContent = origLabel; saveBtn.disabled = false; }, 2000);
         });
     }
-
-    // Pairing actions
-    var pairBtn = document.getElementById('adb-pairBtn');
-    var pairCountdownIv = null;
-    function endPairCountdown(origLabel) {
-      if (pairCountdownIv) { clearInterval(pairCountdownIv); pairCountdownIv = null; }
-      pairBtn.textContent = origLabel;
-      pairBtn.disabled = false;
-    }
-    pairBtn.addEventListener('click', function() {
-      fetch(BASE_URL + '/api/dongle/pair', { method: 'POST' }).catch(function() {});
-      var orig = pairBtn.textContent;
-      var remaining = 30;
-      pairBtn.disabled = true;
-      pairBtn.textContent = 'Pairing… ' + remaining + 's';
-      if (pairCountdownIv) clearInterval(pairCountdownIv);
-      pairCountdownIv = setInterval(function() {
-        remaining -= 1;
-        if (wl.connected || remaining <= 0) { endPairCountdown(orig); return; }
-        pairBtn.textContent = 'Pairing… ' + remaining + 's';
-      }, 1000);
-    });
-
-    // Unpair with confirmation
-    var unpairModal = document.getElementById('adb-unpair-confirm');
-    document.getElementById('adb-unpairBtn').addEventListener('click', function() {
-      unpairModal.style.display = '';
-    });
-    document.getElementById('adb-unpair-cancel').addEventListener('click', function() {
-      unpairModal.style.display = 'none';
-    });
-    unpairModal.addEventListener('click', function(e) {
-      if (e.target === unpairModal) unpairModal.style.display = 'none';
-    });
-    document.getElementById('adb-unpair-confirm-btn').addEventListener('click', function() {
-      unpairModal.style.display = 'none';
-      var deviceUnpair = function() {
-        fetch(BASE_URL + '/api/dongle/devices/' + DEVICE + '/unpair', { method: 'POST' }).catch(function() {});
-      };
-      if (wl.connected) {
-        send('unpair');
-        setTimeout(deviceUnpair, 250);
-      } else {
-        deviceUnpair();
-      }
-    });
 
     document.getElementById('adb-saveBtn').addEventListener('click', saveAndClose);
 
