@@ -258,6 +258,12 @@ let awaitingExpand = false;
 // retract exactly once per job run. Set on every onBeforeCommand call.
 let wasJobRunning = false;
 
+// Last-observed context.laserMode. While the laser is the active head the
+// dust boot must stay put: every automatic trigger below is skipped, and
+// onAfterJobEnd (which has no context of its own) reads this to decide
+// whether the wireless job-end retract should fire.
+let laserModeActive = false;
+
 // === Settings Sanitization ===
 
 const buildInitialConfig = function(raw) {
@@ -399,6 +405,19 @@ function onBeforeCommand(commands, context, settings) {
       awaitingExpand = false;
       return commands;
     }
+  }
+
+  // === Laser mode: stand down ===
+  // With the laser doing the cutting there is no chip stream and the boot
+  // would only get in the way of the beam — so no job-start retract, no
+  // M6 retract, no expand on the first G0 XY, no retract-on-home or
+  // retract-on-rapid. Manual $ADB_ markers above still work because the
+  // operator asked for them explicitly. Keep the job-running edge tracked
+  // so a spindle job started later still sees a clean false→true.
+  laserModeActive = !!(context && context.laserMode === true);
+  if (laserModeActive) {
+    if (typeof context.jobRunning === 'boolean') wasJobRunning = context.jobRunning;
+    return commands;
   }
 
   var hasExpandRetract = (settings.mode === 'wireless') || (expandCommand && retractCommand);
@@ -543,7 +562,8 @@ function onAfterJobEnd(settings) {
     // must explicitly retract so the boot is up for post-job jog /
     // cleanup. CNC is idle here (last g-code already ack'd), so ESP-NOW
     // can fire directly without the G4 P0 sync sentinel used mid-job.
-    if (settings && settings.mode === 'wireless') {
+    // Laser job: the boot was never deployed, leave it alone.
+    if (settings && settings.mode === 'wireless' && !laserModeActive) {
       wirelessSend('goto:0');
     }
     // Wired install: the job's own postscript (M9 or the configured
@@ -555,6 +575,7 @@ function onAfterJobEnd(settings) {
   isToolChanging = false;
   awaitingExpand = false;
   wasJobRunning = false;
+  laserModeActive = false;
 }
 
 // Top-level hook the host calls at program-load time. We used to inject

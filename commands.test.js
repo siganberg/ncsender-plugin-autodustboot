@@ -112,6 +112,57 @@ describe('job start (context.jobRunning transition false→true)', () => {
   });
 });
 
+describe('laser mode (context.laserMode === true)', () => {
+  test('job start injects nothing', () => {
+    const batch = wrap('G21');
+    onBeforeCommand(batch, ctx({ jobRunning: true, sourceId: 'resume', laserMode: true }), WIRED);
+    assert.equal(batch.length, 1, `laser job start must not retract, got ${JSON.stringify(batch.map(c => c.command))}`);
+  });
+
+  test('M6 injects nothing', () => {
+    const batch = wrap('M6 T2');
+    onBeforeCommand(batch, ctx({ jobRunning: true, laserMode: true }), WIRED);
+    assert.equal(batch.length, 1);
+  });
+
+  test('first G0 XY injects nothing', () => {
+    onBeforeCommand(wrap('G21'), ctx({ jobRunning: true, sourceId: 'resume', laserMode: true }), WIRED);
+    const g0 = wrap('G0 X10 Y20');
+    onBeforeCommand(g0, ctx({ jobRunning: true, sourceId: 'resume', laserMode: true }), WIRED);
+    assert.equal(g0.length, 1);
+  });
+
+  test('$H and client G0 inject nothing', () => {
+    const home = wrap('$H');
+    onBeforeCommand(home, ctx({ sourceId: 'client', laserMode: true }), WIRED);
+    assert.equal(home.length, 1);
+    const rapid = wrap('G0 X5');
+    onBeforeCommand(rapid, ctx({ sourceId: 'client', laserMode: true }), WIRED);
+    assert.equal(rapid.length, 1);
+  });
+
+  test('manual $ADB_RETRACT marker still works', () => {
+    const batch = wrap('$ADB_RETRACT');
+    onBeforeCommand(batch, ctx({ sourceId: 'client', laserMode: true }), WIRED);
+    assert.ok(batch.map(c => c.command).join('\n').includes('M9'), 'operator-typed marker must still retract');
+  });
+
+  test('wireless job end does not send goto:0 after a laser job', () => {
+    onBeforeCommand(wrap('G21'), ctx({ jobRunning: true, sourceId: 'resume', laserMode: true }), WIRELESS);
+    globalThis.__adbSentPayloads.length = 0;
+    onAfterJobEnd(WIRELESS);
+    assert.equal(globalThis.__adbSentPayloads.length, 0, 'no wireless retract after a laser job');
+  });
+
+  test('a spindle job after a laser job still retracts at start', () => {
+    onBeforeCommand(wrap('G21'), ctx({ jobRunning: true, sourceId: 'resume', laserMode: true }), WIRED);
+    onAfterJobEnd(WIRED);
+    const batch = wrap('G21');
+    onBeforeCommand(batch, ctx({ jobRunning: true, sourceId: 'resume', laserMode: false }), WIRED);
+    assert.ok(batch.length > 1, 'spindle job start must retract again');
+  });
+});
+
 describe('M6 detection (any context)', () => {
   test('preamble M6 injects retract BEFORE it and arms expand', () => {
     // Job-start transition already fired retract, so a preamble M6 in the
