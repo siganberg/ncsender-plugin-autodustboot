@@ -604,8 +604,9 @@
           Pick <b>Wired</b> if your dust boot is controlled by a relay wired into your CNC. Pick <b>Wireless</b> if you have the AutoDustBoot wireless controller — you'll also be able to move it up and down right from this panel.
         </p>
 
-        <!-- Control-method toggle: unchecked = Wired, checked = Wireless -->
-        <div class="adb-mode-row">
+        <!-- Control-method toggle: unchecked = Wired, checked = Wireless.
+             Hidden until the saved mode loads — see revealMode(). -->
+        <div class="adb-mode-row" id="adb-mode-row" style="visibility:hidden">
           <span class="adb-mode-label" id="adb-label-wired">Wired</span>
           <label class="adb-toggle-switch">
             <input type="checkbox" id="adb-modeToggle">
@@ -615,7 +616,7 @@
         </div>
 
         <!-- ==== WIRED (pneumatic) ==== -->
-        <div id="adb-wired">
+        <div id="adb-wired" style="display:none">
           <div class="adb-callout">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/>
@@ -914,7 +915,7 @@
     var monacoOptions = { language: 'gcode', theme: getMonacoTheme(), minimap: { enabled: false }, lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true, fontSize: 12, tabSize: 2 };
 
     // ---------- Wireless status/controls ----------
-    var wl = { known: false, connected: false, pos: null, saved: null, state: null, homed: null, lastSeenMs: -1, units: 'metric' };
+    var wl = { known: false, connected: false, transport: null, pos: null, saved: null, state: null, homed: null, lastSeenMs: -1, units: 'metric' };
 
     function countsToMm(counts) {
       if (counts == null || isNaN(counts)) return null;
@@ -961,7 +962,7 @@
       var title, sub;
       if (wl.connected) {
         title = 'Connected';
-        sub = 'via Wireless adapter' + (wl.lastSeenMs >= 0 ? ' · last seen ' + wl.lastSeenMs + ' ms ago' : '');
+        sub = (wl.transport === 'usb' ? 'via USB' : 'via Wireless adapter') + (wl.lastSeenMs >= 0 ? ' · last seen ' + wl.lastSeenMs + ' ms ago' : '');
       } else if (wl.known) {
         title = 'Not connected';
         sub = 'Paired but currently offline — power on the AutoDustBoot to reconnect.';
@@ -1004,6 +1005,7 @@
           }
           wl.known = true;
           wl.connected = !!d.connected;
+          wl.transport = d.transport || null;
           wl.lastSeenMs = typeof d.lastSeenMs === 'number' ? d.lastSeenMs : -1;
           parsePayload(d.lastMessage);
           renderWireless();
@@ -1068,6 +1070,7 @@
             if (wl._disconnectTimer) { clearTimeout(wl._disconnectTimer); wl._disconnectTimer = null; }
             wl.connected = true;
             renderWireless();
+            fetchDevice();
           } else {
             if (wl._disconnectTimer) clearTimeout(wl._disconnectTimer);
             wl._disconnectTimer = setTimeout(function() {
@@ -1094,6 +1097,12 @@
     // Note: the wireless-live listeners are always on now (no longer bound to
     // whether the wireless sub-panel is visible), because the Firmware tab
     // relies on wireless status too (ver=, connectivity gating).
+    // The toggle and both panels stay hidden until the stored mode is known, so the
+    // dialog never opens on Wired and switches to Wireless a moment later.
+    function revealMode() {
+      document.getElementById('adb-mode-row').style.visibility = '';
+    }
+
     function setMode(mode) {
       currentMode = (mode === 'wireless') ? 'wireless' : 'wired';
       document.getElementById('adb-modeToggle').checked = currentMode === 'wireless';
@@ -1106,11 +1115,30 @@
         if (expandEditor) expandEditor.layout();
       }
     }
+    // The connection choice is the one setting with no Save button next to it —
+    // that button lives on the Options panel — so it is written the moment it is
+    // picked. The stored settings are read back first: the PUT replaces the whole
+    // config, and sending mode alone would drop the G-code commands with it.
+    function persistMode() {
+      var mode = currentMode;
+      fetch(BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings')
+        .then(function(r) { return r.ok ? r.json() : {}; })
+        .then(function(settings) {
+          settings = settings || {};
+          settings.mode = mode;
+          return fetch(BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
+          });
+        })
+        .catch(function(error) { console.error('Failed to save connection mode:', error); });
+    }
+
+    function pickMode(mode) { setMode(mode); persistMode(); }
     document.getElementById('adb-modeToggle').addEventListener('change', function() {
-      setMode(this.checked ? 'wireless' : 'wired');
+      pickMode(this.checked ? 'wireless' : 'wired');
     });
-    document.getElementById('adb-label-wired').addEventListener('click', function() { setMode('wired'); });
-    document.getElementById('adb-label-wireless').addEventListener('click', function() { setMode('wireless'); });
+    document.getElementById('adb-label-wired').addEventListener('click', function() { pickMode('wired'); });
+    document.getElementById('adb-label-wireless').addEventListener('click', function() { pickMode('wireless'); });
 
     // ---------- Load / save ----------
     function initUI(settings) {
@@ -1133,6 +1161,7 @@
       lastSavedTravelMm = TRAVEL_MM;
       document.getElementById('adb-maxTravelMm').value = TRAVEL_MM;
       setMode(settings.mode === 'wireless' ? 'wireless' : 'wired');
+      revealMode();
     }
 
     function fetchUnits() {
