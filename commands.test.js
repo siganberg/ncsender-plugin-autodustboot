@@ -404,6 +404,32 @@ describe('wireless on a host with DONGLE_WAIT: wait for the boot instead of a fi
   }));
 });
 
+describe('home offset re-sync (device keeps its own copy)', () => {
+  const withStatus = (msg, fn) => {
+    const orig = pluginContext.dongle.getDevices;
+    pluginContext.dongle.getDevices = () => [{ name: 'autodustboot', connected: true, lastSeenMs: 50, lastMessage: msg }];
+    globalThis.__adbSentPayloads.length = 0;
+    try { fn(); } finally { pluginContext.dongle.getDevices = orig; }
+  };
+  const sent = () => globalThis.__adbSentPayloads.map(p => p.payload).filter(p => p.startsWith('$HOMEOFFSET'));
+
+  test('re-sends the saved offset when the boot reports a different one', () => withStatus('status pos=0 expand=1000 hoff=0 homed=1', () => {
+    onBeforeCommand(wrap('G21'), ctx({ sourceId: 'client' }), buildInitialConfig({ mode: 'wireless', homeOffsetMm: 10 }));
+    assert.deepEqual(sent(), ['$HOMEOFFSET:10']);
+  }));
+
+  test('leaves a boot that already matches alone', () => withStatus('status pos=0 expand=1000 hoff=5057 homed=1', () => {
+    onBeforeCommand(wrap('G21'), ctx({ sourceId: 'client' }), buildInitialConfig({ mode: 'wireless', homeOffsetMm: 10 }));
+    assert.deepEqual(sent(), []);
+  }));
+
+  test('older firmware without hoff, and wired mode, are left alone', () => withStatus('status pos=0 expand=1000 homed=1', () => {
+    onBeforeCommand(wrap('G21'), ctx({ sourceId: 'client' }), buildInitialConfig({ mode: 'wireless', homeOffsetMm: 10 }));
+    onBeforeCommand(wrap('G21'), ctx({ sourceId: 'client' }), buildInitialConfig({ mode: 'wired', homeOffsetMm: 10 }));
+    assert.deepEqual(sent(), []);
+  }));
+});
+
 describe('onAfterJobEnd — wireless retract on job completion', () => {
   test('wireless mode: fires goto:0 ESP-NOW directly (CNC is idle, no sync needed)', () => {
     globalThis.__adbSentPayloads.length = 0;

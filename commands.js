@@ -133,6 +133,42 @@ function readSavedExpandPosition() {
   return null;
 }
 
+// Home offset lives on the device (NVS). The dialog pushes it when it changes,
+// but a boot swapped in, flashed, or changed by hand can disagree with the
+// saved setting — so before moving the boot, compare the `hoff=` it reports
+// with the setting and re-send $HOMEOFFSET when they differ. Older firmware
+// reports no hoff and is left alone. Throttled: one attempt per 10 s.
+const ADB_COUNTS_PER_MM = 505.7;
+var lastHomeOffsetSyncMs = 0;
+
+function readDeviceHomeOffsetCounts() {
+  try {
+    if (typeof pluginContext === 'undefined' || !pluginContext || !pluginContext.dongle
+        || typeof pluginContext.dongle.getDevices !== 'function') return null;
+    var devices = pluginContext.dongle.getDevices();
+    for (var i = 0; i < devices.length; i++) {
+      var d = devices[i];
+      if (d && d.name === ADB_DEVICE_NAME && d.connected !== false && typeof d.lastMessage === 'string') {
+        var m = d.lastMessage.match(/(?:^|\s)hoff=(\d+)(?:\s|$)/);
+        if (m) return parseInt(m[1], 10);
+      }
+    }
+  } catch (_) { /* fall through */ }
+  return null;
+}
+
+function syncHomeOffset(settings, nowMs) {
+  if (!settings || settings.mode !== 'wireless') return;
+  var wantMm = Number(settings.homeOffsetMm) || 0;
+  var haveCounts = readDeviceHomeOffsetCounts();
+  if (haveCounts === null) return;
+  if (Math.abs(haveCounts / ADB_COUNTS_PER_MM - wantMm) < 0.1) return;
+  var now = typeof nowMs === 'number' ? nowMs : Date.now();
+  if (now - lastHomeOffsetSyncMs < 10000) return;
+  lastHomeOffsetSyncMs = now;
+  wirelessSend('$HOMEOFFSET:' + wantMm);
+}
+
 function dwellCommand() {
   return 'G4 P' + ADB_WIRELESS_DWELL_SECONDS;
 }
@@ -304,6 +340,12 @@ const buildInitialConfig = function(raw) {
     maxTravelMm: (function() {
       var v = Number(raw.maxTravelMm);
       return (isFinite(v) && v >= 10) ? v : 92;
+    })(),
+    // How far below the top stop the retracted (0) position sits after homing.
+    // Lives on the device (NVS, $HOMEOFFSET:<mm>); kept here for the dialog.
+    homeOffsetMm: (function() {
+      var v = Number(raw.homeOffsetMm);
+      return (isFinite(v) && v >= 0) ? Math.min(v, 50) : 0;
     })()
   };
 };
@@ -311,6 +353,7 @@ const buildInitialConfig = function(raw) {
 // === Command Processing ===
 
 function onBeforeCommand(commands, context, settings) {
+  syncHomeOffset(settings);
   const expandCommand = settings.expandCommand;
   const retractCommand = settings.retractCommand;
   const retractOnHome = settings.retractOnHome;
