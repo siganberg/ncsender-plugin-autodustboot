@@ -359,6 +359,51 @@ describe('wireless mode: DONGLE-sentinel sequence keeps ESP-NOW synced to physic
   });
 });
 
+describe('wireless on a host with DONGLE_WAIT: wait for the boot instead of a fixed dwell', () => {
+  const withWait = (fn) => {
+    pluginContext.dongle.supportsWait = true;
+    try { fn(); } finally { delete pluginContext.dongle.supportsWait; }
+  };
+
+  test('retract waits for pos=0, no G4 P1.5', () => withWait(() => {
+    const b = wrap('$ADB_RETRACT (Added by AutoDustBoot Plugin)');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRELESS);
+    const cmds = b.map(c => c.command);
+    assert.deepEqual(cmds, [
+      'G4 P0',
+      '(DONGLE:autodustboot:goto:0)',
+      '(DONGLE_WAIT:autodustboot:pos=0:50:5)',
+    ]);
+  }));
+
+  test('expand waits for the saved position', () => withWait(() => {
+    onBeforeCommand(wrap('G21'), ctx({ jobRunning: true, sourceId: 'resume' }), WIRELESS);
+    const g0 = wrap('G0 X10 Y20');
+    onBeforeCommand(g0, ctx({ jobRunning: true, sourceId: 'resume' }), WIRELESS);
+    const cmds = g0.map(c => c.command);
+    assert.ok(cmds.includes('(DONGLE:autodustboot:goto:1000)'));
+    assert.ok(cmds.includes('(DONGLE_WAIT:autodustboot:pos=1000:50:5)'), cmds.join('\n'));
+    assert.ok(!cmds.some(c => /G4 P1\.5/.test(c)), 'no fixed dwell when the host can wait');
+  }));
+
+  test('client G0 retract-on-rapid uses the wait too', () => withWait(() => {
+    const settings = buildInitialConfig({ mode: 'wireless', retractOnRapidMove: true });
+    const b = wrap('G0 X50');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), settings);
+    const cmds = b.map(c => c.command);
+    assert.ok(cmds.includes('(DONGLE_WAIT:autodustboot:pos=0:50:5)'), cmds.join('\n'));
+    assert.equal(cmds[cmds.length - 1], 'G0 X50');
+  }));
+
+  test('wired mode is unchanged on a waiting host', () => withWait(() => {
+    const b = wrap('$ADB_RETRACT');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRED);
+    const combined = b.map(c => c.command).join('\n');
+    assert.ok(!combined.includes('DONGLE'), 'wired never uses dongle sentinels');
+    assert.ok(combined.includes('M8'));
+  }));
+});
+
 describe('onAfterJobEnd — wireless retract on job completion', () => {
   test('wireless mode: fires goto:0 ESP-NOW directly (CNC is idle, no sync needed)', () => {
     globalThis.__adbSentPayloads.length = 0;

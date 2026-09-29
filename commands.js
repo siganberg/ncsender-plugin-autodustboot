@@ -26,6 +26,28 @@ const ADB_DEVICE_NAME = 'autodustboot';
 // Kept as a plain string so the user can eyeball it in the terminal.
 const ADB_WIRELESS_DWELL_SECONDS = 1.5;
 
+// Hosts that understand `(DONGLE_WAIT:…)` hold the stream until the boot
+// REPORTS it reached the target instead of dwelling the fixed seconds above:
+// no wait at all when it is already there (e.g. retract with the boot up),
+// and a slow move is waited out rather than guessed. The firmware stops within
+// 3 steps of the target; the timeout only matters if the boot never answers.
+const ADB_WAIT_TOLERANCE_STEPS = 50;
+const ADB_WAIT_TIMEOUT_SECONDS = 5;
+
+function hostSupportsWait() {
+  try {
+    return typeof pluginContext !== 'undefined' && !!pluginContext && !!pluginContext.dongle
+      && pluginContext.dongle.supportsWait === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function waitCommand(targetPos) {
+  return '(DONGLE_WAIT:' + ADB_DEVICE_NAME + ':pos=' + targetPos + ':'
+    + ADB_WAIT_TOLERANCE_STEPS + ':' + ADB_WAIT_TIMEOUT_SECONDS + ')';
+}
+
 function markerLine(marker) {
   return marker + MARKER_ATTRIBUTION;
 }
@@ -349,21 +371,26 @@ function onBeforeCommand(commands, context, settings) {
   // ack'd every queued command ahead of it. Sequence:
   //   1. G4 P0 — grblHAL planner-sync; only ok'd once physical moves finish.
   //   2. (DONGLE:autodustboot:goto:0) — host intercepts, sends ESP-NOW.
-  //   3. G4 P1.5 — dwell so the boot has time to physically move before
-  //      the next command runs.
+  //   3. (DONGLE_WAIT:autodustboot:pos=<target>:…) — host holds the stream
+  //      until the boot reports the target (instant if already there). Older
+  //      hosts without supportsWait get G4 P1.5 — a fixed dwell — instead.
   // Without the G4 P0 barrier, the sentinel would fire mid-cut because
   // grblHAL ok's queued lines the moment they enter the planner buffer,
   // not when they physically execute.
-  function emitWirelessDongleSequence(payload) {
-    var syncBarrier = { command: 'G4 P0', displayCommand: null, meta: showAddedGCode ? {} : { silent: true } };
-    var sentinel    = { command: '(DONGLE:' + ADB_DEVICE_NAME + ':' + payload + ')',
-                        displayCommand: null, meta: showAddedGCode ? {} : { silent: true } };
-    var dwell       = createCommandSequence(dwellCommand());
-    return [syncBarrier, sentinel, dwell];
+  function emitWirelessDongleSequence(targetPos) {
+    var meta = showAddedGCode ? {} : { silent: true };
+    var syncBarrier = { command: 'G4 P0', displayCommand: null, meta: meta };
+    var sentinel    = { command: '(DONGLE:' + ADB_DEVICE_NAME + ':goto:' + targetPos + ')',
+                        displayCommand: null, meta: meta };
+    // The wait must be its own command: the host matches the whole line.
+    var settle      = hostSupportsWait()
+      ? { command: waitCommand(targetPos), displayCommand: null, meta: meta }
+      : createCommandSequence(dwellCommand());
+    return [syncBarrier, sentinel, settle];
   }
   function emitRetract() {
     if (settings.mode === 'wireless') {
-      return emitWirelessDongleSequence('goto:0');
+      return emitWirelessDongleSequence(0);
     }
     if (!retractCommand) return [];
     var s = syncedSequence(retractCommand);
@@ -373,7 +400,7 @@ function onBeforeCommand(commands, context, settings) {
     if (settings.mode === 'wireless') {
       var savedPos = readSavedExpandPosition();
       if (savedPos === null) return [];   // no saved target — skip rather than guess
-      return emitWirelessDongleSequence('goto:' + savedPos);
+      return emitWirelessDongleSequence(savedPos);
     }
     if (!expandCommand) return [];
     var s = syncedSequence(expandCommand);
