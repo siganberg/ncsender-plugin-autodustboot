@@ -2,4 +2,4 @@ Warning: no stdin data received in 3s, proceeding without it. If piping from a s
 ## What's Changed
 
 ### ✨ New Features
-- Added a Home Offset setting so you can choose the boot's home position, and the boot now stays in sync with it
+- Added the $ADB_GOTO command, which moves the dust boot to an exact height in millimeters (for example, $ADB_GOTO 25). You can use it in your G-code programs or macros to set the boot height.
