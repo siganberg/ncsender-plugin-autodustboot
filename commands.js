@@ -13,6 +13,9 @@
 // They are not sent to the controller in their raw form.
 const RETRACT_MARKER = '$ADB_RETRACT';
 const EXPAND_MARKER = '$ADB_EXPAND';
+// $ADB_GOTO <mm>: move the boot to an exact height, in mm below its retracted
+// (home) position. Wireless only: the wired hookup can just toggle M-codes.
+const GOTO_MARKER_RE = /^\$ADB_GOTO\s*Z?\s*([+-]?\d*\.?\d+)\s*(?:\(.*\))?$/i;
 const MARKER_ATTRIBUTION = ' (Added by AutoDustBoot Plugin)';
 
 // Name the paired AutoDustBoot device is known by on the dongle. Matches the
@@ -472,6 +475,24 @@ function onBeforeCommand(commands, context, settings) {
       var eEmit = emitExpand();
       if (eEmit.length > 0) commands.splice.apply(commands, [mi, 1].concat(eEmit));
       else commands.splice(mi, 1);
+      awaitingExpand = false;
+      return commands;
+    }
+    if (/^\$ADB_GOTO/i.test(mtext)) {
+      var gm = mtext.match(GOTO_MARKER_RE);
+      var why = null;
+      if (settings.mode !== 'wireless') why = 'needs the wireless dust boot';
+      else if (!gm) why = 'usage: $ADB_GOTO <mm below the retracted position>';
+      if (why) {
+        // Nothing to move: leave a visible note instead of sending a bad line.
+        commands.splice(mi, 1, { command: '(' + mtext.replace(/[()]/g, '') + ' - ' + why + ')',
+          displayCommand: mtext + '  (' + why + ')', isOriginal: false, meta: {} });
+        return commands;
+      }
+      var mm = Math.min(Math.max(parseFloat(gm[1]), 0), settings.maxTravelMm);
+      commands.splice.apply(commands, [mi, 1].concat(
+        emitWirelessDongleSequence(Math.round(mm * ADB_COUNTS_PER_MM))));
+      // An explicit height overrides the automation until its next retract.
       awaitingExpand = false;
       return commands;
     }

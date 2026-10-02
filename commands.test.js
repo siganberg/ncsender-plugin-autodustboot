@@ -493,3 +493,36 @@ describe('injectDustBootMarkers (still exported for backward compat)', () => {
     assert.ok(rIdx !== -1 && eIdx !== -1, `both markers should exist:\n${out}`);
   });
 });
+
+describe('$ADB_GOTO <mm> (manual height)', () => {
+  test('wireless: moves to mm * 505.7 counts with the move-and-wait sequence', () => {
+    const b = wrap('$ADB_GOTO 20');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRELESS);
+    const combined = b.map(c => c.command).join('\n');
+    assert.ok(combined.includes('G4 P0'), `sync barrier expected, got:\n${combined}`);
+    assert.ok(combined.includes('(DONGLE:autodustboot:goto:10114)'), `20 mm = 10114 counts, got:\n${combined}`);
+  });
+
+  test('accepts lowercase, a Z word and decimals; clamps to the travel', () => {
+    let b = wrap('$adb_goto z12.5');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRELESS);
+    assert.ok(b.map(c => c.command).join('\n').includes('goto:6321'), '12.5 mm = 6321 counts');
+    b = wrap('$ADB_GOTO 500');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRELESS);
+    assert.ok(b.map(c => c.command).join('\n').includes('goto:' + Math.round(92 * 505.7)), 'clamped to max travel (92 mm)');
+    b = wrap('$ADB_GOTO -5');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRELESS);
+    assert.ok(b.map(c => c.command).join('\n').includes('goto:0'), 'negative clamps to the retracted position');
+  });
+
+  test('wired mode or a missing value leaves a note and moves nothing', () => {
+    let b = wrap('$ADB_GOTO 20');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRED);
+    assert.equal(b.length, 1);
+    assert.ok(/^\(.*wireless/.test(b[0].command), `expected a comment note, got ${b[0].command}`);
+    b = wrap('$ADB_GOTO');
+    onBeforeCommand(b, ctx({ sourceId: 'client' }), WIRELESS);
+    assert.equal(b.length, 1);
+    assert.ok(/^\(.*usage/.test(b[0].command), `expected usage note, got ${b[0].command}`);
+  });
+});
