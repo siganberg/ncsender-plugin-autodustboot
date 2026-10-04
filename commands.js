@@ -172,6 +172,15 @@ function syncHomeOffset(settings, nowMs) {
   wirelessSend('$HOMEOFFSET:' + wantMm);
 }
 
+// === Plunge follow (wireless only) ===
+// While the boot is extended, every time work Z drops another interval below
+// zero the boot is raised by that interval, so it stays at about the same
+// height above the work surface. It returns to the saved expand position once
+// Z is back near zero, and the count starts over.
+const Z_WORD_PATTERN = /(?:^|[^A-Z])Z([-+]?(?:\d+\.?\d*|\.\d+))/;
+const Z_REFERENCE_CODE_PATTERN = /(?:^|[^A-Z])G0*(?:53|92|10|28|30|38|43|49|5[4-9])(?:\.\d+)?(?![0-9])/;
+const G92_PATTERN = /(?:^|[^A-Z])G0*92(?![0-9.])/;
+
 function dwellCommand() {
   return 'G4 P' + ADB_WIRELESS_DWELL_SECONDS;
 }
@@ -325,6 +334,34 @@ let wasJobRunning = false;
 // whether the wireless job-end retract should fire.
 let laserModeActive = false;
 
+// Plunge-follow state. followArmed is true only while the boot is extended
+// (set when an expand is emitted, cleared by every retract path and job end).
+// followRetractMm is how far follow has raised the boot above its expand
+// position. trackedZ is the work Z in mm, parsed from the job stream.
+let followArmed = false;
+let followRetractMm = 0;
+let trackedZ = 0;
+let trackedZKnown = false;
+let absMode = true;
+let inchMode = false;
+
+function armFollow() {
+  followArmed = true;
+  followRetractMm = 0;
+}
+
+function disarmFollow() {
+  followArmed = false;
+  followRetractMm = 0;
+}
+
+function resetFollowState() {
+  disarmFollow();
+  trackedZKnown = false;
+  absMode = true;
+  inchMode = false;
+}
+
 // === Settings Sanitization ===
 
 const buildInitialConfig = function(raw) {
@@ -349,9 +386,92 @@ const buildInitialConfig = function(raw) {
     homeOffsetMm: (function() {
       var v = Number(raw.homeOffsetMm);
       return (isFinite(v) && v >= 0) ? Math.min(v, 50) : 0;
+    })(),
+    // Wireless only. Every time work Z drops another this-many mm below zero
+    // the boot is raised by the same amount; 0 turns the feature off.
+    plungeFollowIntervalMm: (function() {
+      var v = parseFloat(raw.plungeFollowIntervalMm);
+      return (isFinite(v) && v > 0) ? Math.min(v, 92) : 0;
     })()
   };
 };
+
+// === Plunge follow ===
+
+function trackPlungeFollow(commands, context, settings) {
+  var interval = settings.plungeFollowIntervalMm;
+  var wpos = context.machineState && context.machineState.wpos;
+  var returnZ = -interval / 2;
+  var meta = settings.showAddedGCode ? {} : { silent: true };
+
+  function injected(text) {
+    return { command: text, displayCommand: null, meta: meta };
+  }
+  function gotoCommand(counts) {
+    return injected('(DONGLE:' + ADB_DEVICE_NAME + ':goto:' + counts + ')');
+  }
+
+  for (var i = 0; i < commands.length; i++) {
+    var cmd = commands[i];
+    if (!cmd.isOriginal) continue;
+    var text = stripNPrefix(cmd.command.trim()).replace(/\([^)]*\)/g, '').replace(/;.*$/, '').toUpperCase().trim();
+    if (!text || text.charAt(0) === '$') continue;
+
+    if (/(?:^|[^A-Z])G0*90(?![0-9.])/.test(text)) absMode = true;
+    if (/(?:^|[^A-Z])G0*91(?![0-9.])/.test(text)) absMode = false;
+    if (/(?:^|[^A-Z])G0*20(?![0-9.])/.test(text)) inchMode = true;
+    if (/(?:^|[^A-Z])G0*21(?![0-9.])/.test(text)) inchMode = false;
+
+    var unit = inchMode ? 25.4 : 1;
+    var zMatch = text.match(Z_WORD_PATTERN);
+
+    if (Z_REFERENCE_CODE_PATTERN.test(text)) {
+      if (G92_PATTERN.test(text) && zMatch) {
+        trackedZ = parseFloat(zMatch[1]) * unit;
+        trackedZKnown = true;
+      } else {
+        trackedZKnown = false;
+      }
+      continue;
+    }
+    if (!zMatch) continue;
+
+    var value = parseFloat(zMatch[1]) * unit;
+    var newZ;
+    if (absMode) {
+      newZ = value;
+    } else {
+      if (!trackedZKnown && wpos && Number.isFinite(wpos.z)) {
+        trackedZ = wpos.z;
+        trackedZKnown = true;
+      }
+      if (!trackedZKnown) continue;
+      newZ = trackedZ + value;
+    }
+    trackedZ = newZ;
+    trackedZKnown = true;
+
+    if (!followArmed) continue;
+    var expandPos = readSavedExpandPosition();
+    if (expandPos === null) continue;
+
+    var need = newZ < 0 ? Math.min(Math.floor(-newZ / interval) * interval, settings.maxTravelMm) : 0;
+    if (need > followRetractMm) {
+      // Boot goes up: fire-and-forget, no G4, so the cut is never held. The
+      // sentinel fires a few moves early at worst, which only raises the boot sooner.
+      var target = Math.max(expandPos - Math.round(need * ADB_COUNTS_PER_MM), 0);
+      commands.splice(i, 0, gotoCommand(target));
+      i++;
+      followRetractMm = need;
+    } else if (followRetractMm > 0 && newZ >= returnZ) {
+      // Boot comes back down once Z is back near zero (half an interval of
+      // hysteresis), and only after the lift has physically finished.
+      commands.splice(i + 1, 0, injected('G4 P0'), gotoCommand(expandPos));
+      i += 2;
+      followRetractMm = 0;
+    }
+  }
+}
 
 // === Command Processing ===
 
@@ -469,6 +589,7 @@ function onBeforeCommand(commands, context, settings) {
       if (rEmit.length > 0) commands.splice.apply(commands, [mi, 1].concat(rEmit));
       else commands.splice(mi, 1);
       awaitingExpand = true;
+      disarmFollow();
       return commands;
     }
     if (startsWithMarker(mtext, EXPAND_MARKER)) {
@@ -476,6 +597,7 @@ function onBeforeCommand(commands, context, settings) {
       if (eEmit.length > 0) commands.splice.apply(commands, [mi, 1].concat(eEmit));
       else commands.splice(mi, 1);
       awaitingExpand = false;
+      armFollow();
       return commands;
     }
     if (/^\$ADB_GOTO/i.test(mtext)) {
@@ -494,6 +616,7 @@ function onBeforeCommand(commands, context, settings) {
         emitWirelessDongleSequence(Math.round(mm * ADB_COUNTS_PER_MM))));
       // An explicit height overrides the automation until its next retract.
       awaitingExpand = false;
+      disarmFollow();
       return commands;
     }
   }
@@ -550,6 +673,7 @@ function onBeforeCommand(commands, context, settings) {
     if (jobStartRetract.length > 0) {
       commands.splice.apply(commands, [0, 0].concat(jobStartRetract));
       awaitingExpand = true;
+      disarmFollow();
     }
   }
   wasJobRunning = jobRunningNow;
@@ -581,6 +705,7 @@ function onBeforeCommand(commands, context, settings) {
     if (m6Retract.length > 0) {
       commands.splice.apply(commands, [toolChangeIndex, 0].concat(m6Retract));
       if (jobRunningNow) awaitingExpand = true;
+      disarmFollow();
     }
   }
 
@@ -600,8 +725,19 @@ function onBeforeCommand(commands, context, settings) {
       if (xyExpand.length > 0) {
         commands.splice.apply(commands, [gi + 1, 0].concat(xyExpand));
         awaitingExpand = false;
+        armFollow();
       }
       break;
+    }
+  }
+
+  // === Plunge follow ===
+  // Runs before the home / rapid handlers below, which return early.
+  if (settings.mode === 'wireless' && settings.plungeFollowIntervalMm > 0) {
+    if (jobRunningNow) {
+      trackPlungeFollow(commands, context, settings);
+    } else {
+      trackedZKnown = false;
     }
   }
 
@@ -616,6 +752,7 @@ function onBeforeCommand(commands, context, settings) {
     var homeRetract = emitRetract();
     if (homeRetract.length > 0) {
       commands.splice.apply(commands, [homeIndex, 0].concat(homeRetract));
+      disarmFollow();
     }
     return commands;
   }
@@ -632,6 +769,7 @@ function onBeforeCommand(commands, context, settings) {
       var g0Retract = emitRetract();
       if (g0Retract.length > 0) {
         commands.splice.apply(commands, [g0Index, 0].concat(g0Retract));
+        disarmFollow();
       }
       return commands;
     }
@@ -667,6 +805,7 @@ function onAfterJobEnd(settings) {
   awaitingExpand = false;
   wasJobRunning = false;
   laserModeActive = false;
+  resetFollowState();
 }
 
 // Top-level hook the host calls at program-load time. We used to inject

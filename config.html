@@ -793,6 +793,20 @@
         </div>
 
         <div class="adb-option-block">
+          <h3 class="adb-option-title">Z travel compensation</h3>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="number" id="adb-plungeFollowIntervalMm" min="0" max="92" step="0.5"
+                   style="width:90px;padding:6px 8px;font-size:14px;background:var(--color-surface,#1a1e26);
+                          color:var(--color-text-primary,#e6ecf2);border:1px solid var(--color-border,#2f3743);
+                          border-radius:6px;">
+            <span style="color:var(--color-text-secondary,#93a2b4);">mm</span>
+          </div>
+          <p class="adb-option-body">
+            For a dust boot mounted on the Z gantry, which moves down with the spindle. Wireless only. While a job runs and the boot is out, every time Z drops another this-many mm below zero (Z0, the top of your stock), the boot is raised by the same amount, so it stays at about the same height above the surface. It goes back out once Z is back near zero. Set to 0 to turn this off.
+          </p>
+        </div>
+
+        <div class="adb-option-block">
           <h3 class="adb-option-title">Show in Terminal</h3>
           <label class="adb-toggle-switch">
             <input type="checkbox" id="adb-showAddedGCode">
@@ -1200,6 +1214,8 @@
       HOME_OFFSET_MM = (isFinite(savedOffset) && savedOffset >= 0) ? Math.min(savedOffset, 50) : 0;
       lastSavedHomeOffsetMm = HOME_OFFSET_MM;
       document.getElementById('adb-homeOffsetMm').value = HOME_OFFSET_MM;
+      var savedInterval = Number(settings.plungeFollowIntervalMm);
+      document.getElementById('adb-plungeFollowIntervalMm').value = (isFinite(savedInterval) && savedInterval > 0) ? Math.min(savedInterval, 92) : 0;
       setMode(settings.mode === 'wireless' ? 'wireless' : 'wired');
       revealMode();
     }
@@ -1251,6 +1267,10 @@
         homeOffsetMm: (function() {
           var v = Number(document.getElementById('adb-homeOffsetMm').value);
           return (isFinite(v) && v >= 0) ? Math.min(v, 50) : 0;
+        })(),
+        plungeFollowIntervalMm: (function() {
+          var v = Number(document.getElementById('adb-plungeFollowIntervalMm').value);
+          return (isFinite(v) && v > 0) ? Math.min(v, TRAVEL_MM) : 0;
         })()
       };
       // If max travel changed, push the new soft-limit to firmware.

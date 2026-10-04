@@ -24,6 +24,7 @@ Access settings via **Plugins → AutoDustBoot** in the toolbar menu.
 | **Retract on Home** | Automatically retract when homing ($H) | Enabled |
 | **Retract on Rapid Move (G0)** | Retract during manual rapid moves | Enabled |
 | **Show Added GCode in Terminal** | Display injected commands in terminal | Disabled |
+| **Z travel compensation** | Wireless only. For a dust boot mounted on the Z gantry: interval in mm, see below. 0 disables it | 0 |
 
 ## How It Works
 
@@ -41,6 +42,17 @@ When `Retract on Home` is enabled, the **Retract Sequence** is injected before a
 ### Manual Rapid Moves (G0)
 
 When `Retract on Rapid Move` is enabled and a G0 command is sent from the terminal or a macro (not from a running job), the **Retract Sequence** is injected before the rapid move.
+
+### Z Travel Compensation (wireless only)
+
+Use this when the dust boot is mounted on the Z gantry, so it moves down with the spindle. When **Z travel compensation** is greater than 0, a running job compensates for the Z travel while the boot is extended:
+
+- Every time work Z drops another interval below zero, the boot is raised by that interval, so it stays at about the same height above the surface. With a 5 mm interval, Z = -12 has raised it 10 mm (two steps). The total is capped at the device's Max Travel.
+- The raise is a fire-and-forget `goto` with no dwell, so the cut is never held up.
+- Once Z is back near zero (within half an interval), the plugin waits for the lifting move to finish (`G4 P0`) and extends the boot to its saved expand position, and the count starts over. A partial rise while Z is still deep leaves the boot where it is.
+- It is inactive while the boot is retracted (tool change, home, rapid retract, job end), after a manual `$ADB_GOTO`, and in laser mode.
+
+Z comes from the job's g-code (G90/G91, G20/G21, G92 are tracked). On hosts that provide `machineState.wpos` it is used to seed Z after a resume or after G53/G28/G54-G59/G43 lines.
 
 ## Typical Setup
 
