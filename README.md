@@ -24,7 +24,7 @@ Access settings via **Plugins → AutoDustBoot** in the toolbar menu.
 | **Retract on Home** | Automatically retract when homing ($H) | Enabled |
 | **Retract on Rapid Move (G0)** | Retract during manual rapid moves | Enabled |
 | **Show Added GCode in Terminal** | Display injected commands in terminal | Disabled |
-| **Raise Boot While Cutting Deep** | Wireless only. Plunge-follow interval in mm, see below. 0 disables it | 0 |
+| **Z travel compensation** | Wireless only. For a dust boot mounted on the Z gantry: interval in mm, see below. 0 disables it | 0 |
 
 ## How It Works
 
@@ -43,9 +43,9 @@ When `Retract on Home` is enabled, the **Retract Sequence** is injected before a
 
 When `Retract on Rapid Move` is enabled and a G0 command is sent from the terminal or a macro (not from a running job), the **Retract Sequence** is injected before the rapid move.
 
-### Plunge Follow (wireless only)
+### Z Travel Compensation (wireless only)
 
-When **Raise Boot While Cutting Deep** is greater than 0, a running job drives the boot while it is extended:
+Use this when the dust boot is mounted on the Z gantry, so it moves down with the spindle. When **Z travel compensation** is greater than 0, a running job compensates for the Z travel while the boot is extended:
 
 - Every time work Z drops another interval below zero, the boot is raised by that interval, so it stays at about the same height above the surface. With a 5 mm interval, Z = -12 has raised it 10 mm (two steps). The total is capped at the device's Max Travel.
 - The raise is a fire-and-forget `goto` with no dwell, so the cut is never held up.

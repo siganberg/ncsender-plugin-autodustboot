@@ -793,7 +793,7 @@
         </div>
 
         <div class="adb-option-block">
-          <h3 class="adb-option-title">Raise Boot While Cutting Deep</h3>
+          <h3 class="adb-option-title">Z travel compensation</h3>
           <div style="display:flex;align-items:center;gap:8px;">
             <input type="number" id="adb-plungeFollowIntervalMm" min="0" max="92" step="0.5"
                    style="width:90px;padding:6px 8px;font-size:14px;background:var(--color-surface,#1a1e26);
@@ -802,7 +802,7 @@
             <span style="color:var(--color-text-secondary,#93a2b4);">mm</span>
           </div>
           <p class="adb-option-body">
-            Wireless only. While a job runs and the boot is out, every time the spindle drops another this-many mm below zero (Z0, the top of your stock), the boot is raised by the same amount, so it stays at about the same height above the surface. It goes back out once the spindle is back near zero. Set to 0 to turn this off.
+            For a dust boot mounted on the Z gantry, which moves down with the spindle. Wireless only. While a job runs and the boot is out, every time Z drops another this-many mm below zero (Z0, the top of your stock), the boot is raised by the same amount, so it stays at about the same height above the surface. It goes back out once Z is back near zero. Set to 0 to turn this off.
           </p>
         </div>
 
