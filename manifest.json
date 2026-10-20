@@ -1,7 +1,7 @@
 {
   "id": "com.ncsender.autodustboot",
   "name": "AutoDustboot",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "minAppVersion": "0.3.111",
   "author": "FrancisCreation",
   "description": "Automatically finds the best position to expand the AutoDustBoot.",
