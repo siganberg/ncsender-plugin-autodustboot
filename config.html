@@ -727,6 +727,9 @@
           </div>
         </div>
       </div>
+      <footer class="adb-panel-footer" id="adb-wiredFooter">
+        <button type="button" class="adb-primary-btn adb-save" id="adb-saveWiredBtn">Save</button>
+      </footer>
     </section>
 
     <!-- ============ Options tab ============ -->
@@ -804,7 +807,7 @@
         </div>
       </div>
       <footer class="adb-panel-footer">
-        <button type="button" class="adb-primary-btn" id="adb-saveBtn">Save</button>
+        <button type="button" class="adb-primary-btn adb-save" id="adb-saveBtn">Save</button>
       </footer>
     </section>
 
@@ -1146,14 +1149,14 @@
       document.getElementById('adb-label-wireless').classList.toggle('active', currentMode === 'wireless');
       document.getElementById('adb-wired').style.display = currentMode === 'wired' ? '' : 'none';
       document.getElementById('adb-wireless').style.display = currentMode === 'wireless' ? '' : 'none';
+      document.getElementById('adb-wiredFooter').style.display = currentMode === 'wired' ? '' : 'none';
       if (currentMode === 'wired') {
         if (retractEditor) retractEditor.layout();
         if (expandEditor) expandEditor.layout();
       }
     }
-    // The connection choice is the one setting with no Save button next to it —
-    // that button lives on the Options panel — so it is written the moment it is
-    // picked. The stored settings are read back first: the PUT replaces the whole
+    // The connection choice has no Save button next to it, so it is written the
+    // moment it is picked. The stored settings are read back first: the PUT replaces the whole
     // config, and sending mode alone would drop the G-code commands with it.
     function persistMode() {
       var mode = currentMode;
@@ -1272,25 +1275,28 @@
         lastSavedHomeOffsetMm = settings.homeOffsetMm;
         HOME_OFFSET_MM = settings.homeOffsetMm;
       }
-      var saveBtn = document.getElementById('adb-saveBtn');
-      var origLabel = saveBtn.textContent;
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving…';
+      // Every Save button saves the whole config, so they all show the result.
+      var saveBtns = document.querySelectorAll('.adb-save');
+      var origLabel = 'Save';
+      function label(text, disabled) {
+        saveBtns.forEach(function(b) { b.textContent = text; b.disabled = disabled; });
+      }
+      label('Saving…', true);
       fetch(BASE_URL + '/api/plugins/com.ncsender.autodustboot/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
       })
         .then(function() {
-          saveBtn.textContent = 'Saved';
-          setTimeout(function() { saveBtn.textContent = origLabel; saveBtn.disabled = false; }, 1000);
+          label('Saved', true);
+          setTimeout(function() { label(origLabel, false); }, 1000);
         })
         .catch(function(error) {
           console.error('Failed to save settings:', error);
-          saveBtn.textContent = 'Save failed';
-          setTimeout(function() { saveBtn.textContent = origLabel; saveBtn.disabled = false; }, 2000);
+          label('Save failed', true);
+          setTimeout(function() { label(origLabel, false); }, 2000);
         });
     }
 
-    document.getElementById('adb-saveBtn').addEventListener('click', saveAndClose);
+    document.querySelectorAll('.adb-save').forEach(function(b) { b.addEventListener('click', saveAndClose); });
 
     init();
   })();
