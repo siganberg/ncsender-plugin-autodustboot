@@ -545,11 +545,13 @@ function onBeforeCommand(commands, context, settings) {
     }
     jobRunningNow = inferJob;
   }
+  var retractedHere = false;
   if (jobRunningNow && !wasJobRunning && !awaitingExpand) {
     var jobStartRetract = emitRetract();
     if (jobStartRetract.length > 0) {
       commands.splice.apply(commands, [0, 0].concat(jobStartRetract));
       awaitingExpand = true;
+      retractedHere = true;
     }
   }
   wasJobRunning = jobRunningNow;
@@ -576,7 +578,12 @@ function onBeforeCommand(commands, context, settings) {
     return /^\$tls/i.test(cmd.command.trim());
   });
   var toolChangeIndex = m6Index !== -1 ? m6Index : tlsIndex;
-  if (toolChangeIndex !== -1 && !awaitingExpand) {
+  // Every tool change retracts, whatever the arm says: the arm can be stale
+  // (a job aborted without a job-end, the boot expanded by hand from the
+  // Outputs button), and a boot left down at the first M6 hits the rack.
+  // A retract is harmless when the boot is already up (wireless: the wait
+  // returns at once). Only skipped when this same batch just retracted.
+  if (toolChangeIndex !== -1 && !retractedHere) {
     var m6Retract = emitRetract();
     if (m6Retract.length > 0) {
       commands.splice.apply(commands, [toolChangeIndex, 0].concat(m6Retract));
