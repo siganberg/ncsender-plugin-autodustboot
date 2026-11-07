@@ -24,6 +24,7 @@ Access settings via **Plugins → AutoDustBoot** in the toolbar menu.
 | **Retract on Home** | Automatically retract when homing ($H) | Enabled |
 | **Retract on Rapid Move (G0)** | Retract during manual rapid moves | Enabled |
 | **Show Added GCode in Terminal** | Display injected commands in terminal | Disabled |
+| **Z travel compensation** | Wireless only. For a dust boot mounted on the Z gantry: interval in mm, see below. 0 disables it | 0 |
 
 ## How It Works
 
@@ -41,6 +42,23 @@ When `Retract on Home` is enabled, the **Retract Sequence** is injected before a
 ### Manual Rapid Moves (G0)
 
 When `Retract on Rapid Move` is enabled and a G0 command is sent from the terminal or a macro (not from a running job), the **Retract Sequence** is injected before the rapid move.
+
+### Z Travel Compensation (wireless only)
+
+Use this when the dust boot is mounted on the Z gantry, so it moves down with the spindle. When **Z travel compensation** is greater than 0, a running job compensates for the Z travel while the boot is extended:
+
+- Every time work Z drops another interval below zero, the boot is raised by that interval, so it stays at about the same height above the surface. With a 5 mm interval, Z = -12 has raised it 10 mm (two steps). The total is capped at the device's Max Travel.
+- The raise is a fire-and-forget `goto` with no dwell, so the cut is never held up.
+- Once Z is back near zero (within half an interval), the plugin waits for the lifting move to finish (`G4 P0`) and extends the boot to its saved expand position, and the count starts over. A partial rise while Z is still deep leaves the boot where it is.
+- It is inactive while the boot is retracted (tool change, home, rapid retract, job end), after a manual `$ADB_GOTO`, and in laser mode.
+
+The boot is raised just ahead of a plunge, from the Z in the job's g-code (G90/G91, G20/G21 and G92 are tracked). Where the host provides the live machine position (`getServerState()`, ncSender v2.0.224 and later), the real tool Z (machine position minus work offset, in the controller's units) then confirms and corrects it:
+
+- It raises the boot if the spindle is deeper than the g-code showed, for example after a resume or a G53/G28 line.
+- It brings the boot back down only once the spindle has really risen, with no planner sync (`G4 P0`).
+- With safe zones on, the boot goes to the higher of the zone safe height and the compensated position, so leaving a zone never drops it into the part.
+
+On older hosts it works from the g-code alone and extends with `G4 P0` + `goto`.
 
 ## Typical Setup
 
