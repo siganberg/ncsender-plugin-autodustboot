@@ -52,7 +52,13 @@ Use this when the dust boot is mounted on the Z gantry, so it moves down with th
 - Once Z is back near zero (within half an interval), the plugin waits for the lifting move to finish (`G4 P0`) and extends the boot to its saved expand position, and the count starts over. A partial rise while Z is still deep leaves the boot where it is.
 - It is inactive while the boot is retracted (tool change, home, rapid retract, job end), after a manual `$ADB_GOTO`, and in laser mode.
 
-Z comes from the job's g-code (G90/G91, G20/G21, G92 are tracked). On hosts that provide `machineState.wpos` it is used to seed Z after a resume or after G53/G28/G54-G59/G43 lines.
+The boot is raised just ahead of a plunge, from the Z in the job's g-code (G90/G91, G20/G21 and G92 are tracked). Where the host provides the live machine position (`getServerState()`, ncSender v2.0.224 and later), the real tool Z (machine position minus work offset, in the controller's units) then confirms and corrects it:
+
+- It raises the boot if the spindle is deeper than the g-code showed, for example after a resume or a G53/G28 line.
+- It brings the boot back down only once the spindle has really risen, with no planner sync (`G4 P0`).
+- With safe zones on, the boot goes to the higher of the zone safe height and the compensated position, so leaving a zone never drops it into the part.
+
+On older hosts it works from the g-code alone and extends with `G4 P0` + `goto`.
 
 ## Typical Setup
 

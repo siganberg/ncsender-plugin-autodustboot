@@ -37,6 +37,8 @@ const {
   buildInitialConfig,
   onAfterJobEnd,
   injectDustBootMarkers,
+  followTick,
+  zone,
 } = await import('./commands.js');
 
 const WIRED = buildInitialConfig({
@@ -545,6 +547,27 @@ describe('$ADB_GOTO <mm> (manual height)', () => {
   });
 });
 
+// The host's live state: work Z is mpos.z - wco.z. wco.z is fixed at -50 so a
+// work Z of -12 is a machine Z of -62. Restores the stubs afterwards, so the
+// tests outside it run as on a host without getServerState.
+const live = { z: 0, job: 'running', inch: 0 };
+function withLive(workZ, fn, opts) {
+  live.z = workZ;
+  live.job = (opts && opts.job) || 'running';
+  live.inch = (opts && opts.inch) || 0;
+  const ctxRef = globalThis.pluginContext;
+  ctxRef.getServerState = () => ({
+    jobStatus: live.job, machineStatus: 'Run', line: 1,
+    mpos: { x: 0, y: 0, z: live.z - 50 }, wco: { x: 0, y: 0, z: -50 },
+  });
+  ctxRef.getFirmwareSetting = () => live.inch;
+  try { fn(); } finally { delete ctxRef.getServerState; delete ctxRef.getFirmwareSetting; }
+}
+const lastGoto = () => {
+  const sent = globalThis.__adbSentPayloads.filter(p => String(p.payload).startsWith('goto:'));
+  return sent.length ? sent[sent.length - 1].payload : null;
+};
+
 describe('plunge follow (wireless)', () => {
   const FOLLOW = buildInitialConfig({ mode: 'wireless', plungeFollowIntervalMm: 5 });
   const job = (o) => ctx(Object.assign({ jobRunning: true }, o));
@@ -687,13 +710,13 @@ describe('plunge follow (wireless)', () => {
     });
   });
 
-  test('uses wpos to seed relative tracking when Z is unknown', () => {
+  test('seeds relative tracking from the live position when Z is unknown', () => {
     withExpandPos(46524, () => {
       startExtended(FOLLOW);
       onBeforeCommand(wrap('N4 G53 G0 Z0'), job(), FOLLOW);
       onBeforeCommand(wrap('N5 G91'), job(), FOLLOW);
       const rel = wrap('N6 G1 Z-8');
-      onBeforeCommand(rel, job({ machineState: { wpos: { x: 0, y: 0, z: -3 } } }), FOLLOW);
+      withLive(-3, () => onBeforeCommand(rel, job(), FOLLOW));
       assert.deepEqual(gotos(rel), [pos(10)], '-3 + -8 = -11');
     });
   });
@@ -764,6 +787,127 @@ describe('plunge follow (wireless)', () => {
       const plunge = wrap('N5 G1 Z-12');
       onBeforeCommand(plunge, job(), FOLLOW);
       assert.deepEqual(gotos(plunge), []);
+    });
+  });
+});
+
+describe('Z travel compensation from the live position', () => {
+  const job = (o) => ctx(Object.assign({ jobRunning: true }, o));
+  const gotos = (batch) => batch.map(c => c.command).filter(c => c.includes('goto:'));
+  const realGetDevices = globalThis.pluginContext.dongle.getDevices;
+  const posOf = (mm) => 46524 - Math.round(mm * 505.7);
+
+  function setup(cfg, fn) {
+    globalThis.pluginContext.dongle.getDevices = () => [{
+      name: 'autodustboot', connected: true, lastSeenMs: 100,
+      lastMessage: 'status pos=0 expand=46524 state=home homed=1',
+    }];
+    try {
+      const settings = buildInitialConfig(Object.assign({ mode: 'wireless', plungeFollowIntervalMm: 5 }, cfg));
+      onBeforeCommand(wrap('N1 G21'), job(), settings);
+      onBeforeCommand(wrap('N2 G90'), job(), settings);
+      onBeforeCommand(wrap('N3 G0 X10 Y10'), job(), settings);
+      fn(settings);
+    } finally {
+      globalThis.pluginContext.dongle.getDevices = realGetDevices;
+    }
+  }
+
+  beforeEach(() => { globalThis.__adbSentPayloads.length = 0; });
+
+  test('raises the boot when the real Z is deeper than the g-code showed', () => {
+    setup({}, () => {
+      withLive(-12, () => followTick());
+      assert.equal(lastGoto(), 'goto:' + posOf(10));
+    });
+  });
+
+  test('does not move the boot while Z stays in the same interval', () => {
+    setup({}, () => {
+      withLive(-12, () => { followTick(); followTick(); });
+      withLive(-14, () => followTick());
+      assert.equal(globalThis.__adbSentPayloads.filter(p => String(p.payload).startsWith('goto:')).length, 1);
+    });
+  });
+
+  test('brings the boot back only once the spindle has really risen, without a G4', () => {
+    setup({}, (settings) => {
+      onBeforeCommand(wrap('N4 G1 Z-12'), job(), settings);        // g-code raises it ahead of the plunge
+      const lift = wrap('N5 G0 Z5');
+      withLive(-12, () => onBeforeCommand(lift, job(), settings));
+      assert.equal(lift.length, 1, 'with live position the g-code side adds no extend and no G4');
+      withLive(-12, () => followTick());                             // still deep: the lift has not happened yet
+      assert.equal(lastGoto(), null, 'tick keeps the boot raised');
+      withLive(1, () => followTick());
+      assert.equal(lastGoto(), 'goto:46524');
+    });
+  });
+
+  test('does not lower the boot while a written plunge has not been reached yet', () => {
+    setup({}, (settings) => {
+      onBeforeCommand(wrap('N4 G1 Z-12'), job(), settings);        // queued; the spindle is still at the top
+      withLive(0, () => followTick());
+      assert.equal(lastGoto(), null);
+    });
+  });
+
+  test('reads inch controllers ($13)', () => {
+    globalThis.pluginContext.dongle.getDevices = () => [{
+      name: 'autodustboot', connected: true, lastSeenMs: 100,
+      lastMessage: 'status pos=0 expand=46524 state=home homed=1',
+    }];
+    try {
+      const settings = buildInitialConfig({ mode: 'wireless', plungeFollowIntervalMm: 5 });
+      withLive(-1, () => {
+        onBeforeCommand(wrap('N1 G21'), job(), settings);
+        onBeforeCommand(wrap('N2 G0 X10 Y10'), job(), settings);
+        followTick();
+      }, { inch: 1 });
+      assert.equal(lastGoto(), 'goto:' + posOf(25), '-1 in = -25.4 mm = five 5 mm intervals');
+    } finally {
+      globalThis.pluginContext.dongle.getDevices = realGetDevices;
+    }
+  });
+
+  test('stays quiet when disarmed, paused, or off', () => {
+    setup({}, (settings) => {
+      withLive(-12, () => followTick(), { job: 'paused' });
+      assert.equal(lastGoto(), null, 'paused job');
+      onBeforeCommand(wrap('N4 M6 T2'), job(), settings);
+      globalThis.__adbSentPayloads.length = 0;
+      withLive(-12, () => followTick());
+      assert.equal(lastGoto(), null, 'disarmed by the tool change');
+    });
+    setup({ plungeFollowIntervalMm: 0 }, () => {
+      withLive(-12, () => followTick());
+      assert.equal(lastGoto(), null, 'interval 0');
+    });
+  });
+
+  describe('with safe zones', () => {
+    const ZONE = { name: 'Rail', x1: 280, x2: 300, y1: 0, y2: 500 };
+    const withZones = { zonesEnabled: true, zones: [ZONE], safeLiftMm: 20 };
+
+    test('after leaving a zone the boot drops to the compensated height, not all the way', () => {
+      setup(withZones, () => {
+        withLive(-12, () => followTick());                           // compensating 10 mm
+        zone.state = 'up';
+        globalThis.__adbSentPayloads.length = 0;
+        withLive(-12, () => followTick());
+        // zone-up wants expand - 20 mm; compensation wants expand - 10 mm: the zone is higher
+        assert.equal(lastGoto(), 'goto:' + posOf(20));
+        zone.state = 'down';
+        withLive(-12, () => followTick());
+        assert.equal(lastGoto(), 'goto:' + posOf(10), 'compensated, not goto:46524');
+      });
+    });
+
+    test('compensation higher than the safe lift wins while in a zone', () => {
+      setup(withZones, () => {
+        zone.state = 'up';
+        withLive(-30, () => followTick());
+        assert.equal(lastGoto(), 'goto:' + posOf(30));
+      });
     });
   });
 });

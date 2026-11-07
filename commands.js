@@ -345,14 +345,56 @@ let trackedZKnown = false;
 let absMode = true;
 let inchMode = false;
 
+// The last position the plugin sent the boot to, so the live tick only sends
+// when the wanted position changes. null: unknown, the tick stays quiet.
+let lastBootGoto = null;
+let followUnitsInch = false;
+
 function armFollow() {
   followArmed = true;
   followRetractMm = 0;
+  lastBootGoto = readSavedExpandPosition();
+  refreshFollowUnits();
 }
 
 function disarmFollow() {
   followArmed = false;
   followRetractMm = 0;
+  lastBootGoto = null;
+}
+
+function bootGoto(pos) {
+  wirelessSend('goto:' + pos);
+  lastBootGoto = pos;
+}
+
+// The expanded position with the compensation raise taken off.
+function compExpand(expand) {
+  if (!followArmed || followRetractMm <= 0) return expand;
+  return Math.max(0, expand - Math.round(followRetractMm * ADB_COUNTS_PER_MM));
+}
+
+// Work Z in mm from the host's live state (machine position minus the work
+// offset, which includes the tool length offset), or null without it.
+function workZFromState(st) {
+  if (!st || !st.mpos || !st.wco) return null;
+  var z = (st.mpos.z - st.wco.z) * (followUnitsInch ? 25.4 : 1);
+  return isFinite(z) ? z : null;
+}
+
+function currentWorkZ() {
+  if (!hostHas('getServerState')) return null;
+  try { return workZFromState(pluginContext.getServerState()); } catch (_) { return null; }
+}
+
+function refreshFollowUnits() {
+  try {
+    var s13 = hostHas('getFirmwareSetting') ? pluginContext.getFirmwareSetting('13') : null;
+    // $13 bit 0: positions reported in inches.
+    followUnitsInch = typeof s13 === 'number' && (s13 & 1) === 1;
+  } catch (_) {
+    followUnitsInch = false;
+  }
 }
 
 function resetFollowState() {
@@ -413,9 +455,8 @@ const buildInitialConfig = function(raw) {
 
 // === Plunge follow ===
 
-function trackPlungeFollow(commands, context, settings) {
+function trackPlungeFollow(commands, settings) {
   var interval = settings.plungeFollowIntervalMm;
-  var wpos = context.machineState && context.machineState.wpos;
   var returnZ = -interval / 2;
   var meta = settings.showAddedGCode ? {} : { silent: true };
 
@@ -456,9 +497,12 @@ function trackPlungeFollow(commands, context, settings) {
     if (absMode) {
       newZ = value;
     } else {
-      if (!trackedZKnown && wpos && Number.isFinite(wpos.z)) {
-        trackedZ = wpos.z;
-        trackedZKnown = true;
+      if (!trackedZKnown) {
+        var liveZ = currentWorkZ();
+        if (liveZ !== null) {
+          trackedZ = liveZ;
+          trackedZKnown = true;
+        }
       }
       if (!trackedZKnown) continue;
       newZ = trackedZ + value;
@@ -478,12 +522,15 @@ function trackPlungeFollow(commands, context, settings) {
       commands.splice(i, 0, gotoCommand(target));
       i++;
       followRetractMm = need;
-    } else if (followRetractMm > 0 && newZ >= returnZ) {
-      // Boot comes back down once Z is back near zero (half an interval of
-      // hysteresis), and only after the lift has physically finished.
+      lastBootGoto = target;
+    } else if (followRetractMm > 0 && newZ >= returnZ && !hostHas('getServerState')) {
+      // Without the host's live position: bring the boot back down once Z is
+      // back near zero (half an interval of hysteresis), only after the lift
+      // has physically finished. With it, followTick does this from the real Z.
       commands.splice(i + 1, 0, injected('G4 P0'), gotoCommand(expandPos));
       i += 2;
       followRetractMm = 0;
+      lastBootGoto = expandPos;
     }
   }
 }
@@ -861,7 +908,8 @@ function zoneTick() {
 
   var boot = readBootStatus();
   if (!boot || !boot.connected || boot.expand === null || boot.expand <= 0) return;
-  var safe = safePosition(settings, boot.expand);
+  var downPos = compExpand(boot.expand);
+  var safe = Math.min(safePosition(settings, boot.expand), downPos);
   settings = withLift(settings, boot.expand);
   var tol = ADB_WAIT_TOLERANCE_STEPS;
   var now = Date.now();
@@ -869,7 +917,7 @@ function zoneTick() {
   if (zone.state === 'idle') {
     // Take over once the stream's expand (or its safe-height version) is done.
     if (boot.pos === null) return;
-    if (Math.abs(boot.pos - boot.expand) <= tol) zone.state = 'down';
+    if (Math.abs(boot.pos - downPos) <= tol) zone.state = 'down';
     else if (Math.abs(boot.pos - safe) <= tol) { zone.state = 'up'; zone.upAt = now; zone.changedAt = now; }
     else return;
     if (!zone.paths) prepareZones(settings);
@@ -884,13 +932,13 @@ function zoneTick() {
 
   var action = decideZone(zone.state, entry, inZone, settings, (now - zone.changedAt) / 1000);
   if (action === 'up') {
-    wirelessSend('goto:' + safe);
+    bootGoto(safe);
     zone.state = 'up';
     zone.changedAt = now;
     var fromMm = boot.pos === null ? settings.safeLiftMm : Math.abs(boot.pos - safe) / ADB_COUNTS_PER_MM;
     zone.upAt = now + bootMoveSec(fromMm) * 1000;
   } else if (action === 'down') {
-    wirelessSend('goto:' + boot.expand);
+    bootGoto(downPos);
     zone.state = 'down';
     zone.changedAt = now;
   }
@@ -923,8 +971,42 @@ function expandTargetFor(gtext, settings, expand) {
   return expand;
 }
 
+// === Z travel compensation, live part (host timer) ===
+// The g-code side (trackPlungeFollow) raises the boot ahead of a plunge. This
+// tick works from the real tool position: it raises the boot if the spindle is
+// deeper than the g-code showed, and brings it back down only once the spindle
+// has really risen, so no planner sync is needed. It also keeps the safe-zone
+// lift and the compensation on one target: the higher of the two wins.
+function followTick() {
+  var settings = zoneSettings;
+  if (!settings || settings.mode !== 'wireless' || !(settings.plungeFollowIntervalMm > 0)) return;
+  if (!followArmed || awaitingExpand || laserModeActive || lastBootGoto === null) return;
+  if (!hostHas('getServerState')) return;
+  var st = pluginContext.getServerState();
+  if (!st || st.jobStatus !== 'running') return;
+  var wz = workZFromState(st);
+  if (wz === null) return;
+  var expand = readSavedExpandPosition();
+  if (expand === null) return;
+
+  var interval = settings.plungeFollowIntervalMm;
+  var need = wz < 0 ? Math.min(Math.floor(-wz / interval) * interval, settings.maxTravelMm) : 0;
+  if (need > followRetractMm) {
+    followRetractMm = need;
+  } else if (followRetractMm > 0 && wz >= -interval / 2
+      && (!trackedZKnown || trackedZ >= -interval / 2)) {
+    // Really back near zero, and the program is not about to plunge again.
+    followRetractMm = 0;
+  }
+
+  var wanted = compExpand(expand);
+  if (zone.state === 'up' && zonesActive(settings)) wanted = Math.min(wanted, safePosition(settings, expand));
+  if (Math.abs(wanted - lastBootGoto) > ADB_WAIT_TOLERANCE_STEPS) bootGoto(wanted);
+}
+
 if (typeof pluginContext !== 'undefined' && pluginContext && typeof pluginContext.setInterval === 'function') {
   pluginContext.setInterval(function() {
+    try { followTick(); } catch (_) { /* never break the host timer */ }
     try { zoneTick(); } catch (_) { /* never break the host timer */ }
   }, ZONE_TICK_MS);
 }
@@ -1203,7 +1285,7 @@ function onBeforeCommand(commands, context, settings) {
   // Runs before the home / rapid handlers below, which return early.
   if (settings.mode === 'wireless' && settings.plungeFollowIntervalMm > 0) {
     if (jobRunningNow) {
-      trackPlungeFollow(commands, context, settings);
+      trackPlungeFollow(commands, settings);
     } else {
       trackedZKnown = false;
     }
@@ -1289,4 +1371,5 @@ function onGcodeProgramLoad(content, _context, _settings) {
 }
 
 export { onBeforeCommand, buildInitialConfig, onAfterJobEnd, injectDustBootMarkers, onGcodeProgramLoad,
-  parseProgramPaths, segmentEntry, secondsToZone, decideZone, activeRects, insideAny, sanitizeZones, zoneTick, zone };
+  parseProgramPaths, segmentEntry, secondsToZone, decideZone, activeRects, insideAny, sanitizeZones, zoneTick, zone,
+  followTick };
