@@ -366,7 +366,7 @@ function resetFollowState() {
 
 const buildInitialConfig = function(raw) {
   if (!raw) raw = {};
-  return {
+  var cfg = {
     mode: raw.mode === 'wireless' ? 'wireless' : 'wired',
     retractCommand: raw.retractCommand || 'M8\nG4 P0.1\nM9\nG4 P1.5',
     expandCommand: raw.expandCommand || 'M8',
@@ -387,6 +387,19 @@ const buildInitialConfig = function(raw) {
       var v = Number(raw.homeOffsetMm);
       return (isFinite(v) && v >= 0) ? Math.min(v, 50) : 0;
     })(),
+    // Safe zones (wireless only, beta): machine-coordinate rectangles where
+    // the boot rides at safe height instead of expanded, e.g. over clamps or
+    // extrusions at the edges. See the Safe zones section below.
+    zonesEnabled: raw.zonesEnabled === true,
+    zones: sanitizeZones(raw.zones),
+    // Safe height as the boot position, mm below retracted (what the dialog
+    // shows). Unset: safeLiftMm above the expanded position.
+    safePosMm: raw.safePosMm === null || raw.safePosMm === undefined || raw.safePosMm === '' ? null : clampNum(raw.safePosMm, 0, 500, null),
+    safeLiftMm: clampNum(raw.safeLiftMm, 1, 90, 28),
+    zoneClearanceMm: clampNum(raw.zoneClearanceMm, 0, 50, 5),
+    liftEarlySec: clampNum(raw.liftEarlySec, 0, 3, 0.3),
+    stayUpBetween: raw.stayUpBetween !== undefined ? raw.stayUpBetween === true : true,
+    pauseIfLate: raw.pauseIfLate !== undefined ? raw.pauseIfLate === true : true,
     // Wireless only. Every time work Z drops another this-many mm below zero
     // the boot is raised by the same amount; 0 turns the feature off.
     plungeFollowIntervalMm: (function() {
@@ -394,6 +407,8 @@ const buildInitialConfig = function(raw) {
       return (isFinite(v) && v > 0) ? Math.min(v, 92) : 0;
     })()
   };
+  zoneSettings = cfg;
+  return cfg;
 };
 
 // === Plunge follow ===
@@ -471,6 +486,447 @@ function trackPlungeFollow(commands, context, settings) {
       followRetractMm = 0;
     }
   }
+}
+
+
+// === Safe zones (wireless, beta) ===
+// Some areas of the bed have something sticking up — clamps, extrusions at
+// the edges — that the expanded boot would hit while the bit itself clears
+// it. In those zones the boot rides at a safe height (expanded minus
+// safeLiftMm) and drops back once the spindle has left, without pausing the
+// job: the lift goes straight to the boot over the dongle, timed ahead.
+//
+// Timing: the host gives the loaded program with each line's estimated
+// seconds (from $110–$122 and $11) and, about 10 times a second, the line
+// executing now, the machine position and the work offset. From the spindle
+// the plugin walks the program forward, finds when the toolpath first
+// enters a zone (plus clearance) and sends the lift once that is within the
+// boot's move time + liftEarlySec + a latency allowance. Estimates are
+// scaled down (ZONE_TIME_SAFETY) so a machine faster than the estimate still
+// gets the boot up in time. Safety net: when the spindle is about to enter
+// and the boot can't be up yet, a feed hold, resumed when it is.
+//
+// Zones are spindle-centre areas: where the spindle centre must not be with
+// the boot expanded. Drawing them by jogging the spindle to the corners
+// (boot edge just over the obstacle) gives exactly that.
+
+var zoneSettings = null;
+const ZONE_TICK_MS = 100;
+const ZONE_TIME_SAFETY = 0.85;   // predicted times × this: lift a little early rather than late
+const ZONE_LATENCY_SEC = 0.25;   // status age + tick + radio
+const BOOT_MM_PER_SEC = 60;      // conservative; the boot moves ~80 mm/s
+const BOOT_START_SEC = 0.15;
+const ZONE_HORIZON_SEC = 12;
+const ZONE_MAX_LINES_AHEAD = 4000;
+
+function clampNum(v, lo, hi, dflt) {
+  var n = Number(v);
+  if (!isFinite(n)) return dflt;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+var MAX_ZONES = 3;
+
+function sanitizeZones(raw) {
+  if (!Array.isArray(raw)) return [];
+  var out = [];
+  for (var i = 0; i < raw.length && out.length < MAX_ZONES; i++) {
+    var z = raw[i] || {};
+    var x1 = Number(z.x1), x2 = Number(z.x2), y1 = Number(z.y1), y2 = Number(z.y2);
+    if (![x1, x2, y1, y2].every(isFinite)) continue;
+    out.push({
+      name: typeof z.name === 'string' && z.name.trim() ? z.name.trim().slice(0, 40) : 'Zone ' + (out.length + 1),
+      x1: Math.min(x1, x2), x2: Math.max(x1, x2),
+      y1: Math.min(y1, y2), y2: Math.max(y1, y2),
+      enabled: z.enabled !== false
+    });
+  }
+  return out;
+}
+
+function bootMoveSec(mm) { return BOOT_START_SEC + Math.abs(mm) / BOOT_MM_PER_SEC; }
+
+// Active zones grown by the clearance.
+function activeRects(settings) {
+  var c = settings.zoneClearanceMm || 0;
+  var out = [];
+  (settings.zones || []).forEach(function(z) {
+    if (z.enabled === false) return;
+    out.push({ x1: z.x1 - c, x2: z.x2 + c, y1: z.y1 - c, y2: z.y2 + c, name: z.name });
+  });
+  return out;
+}
+
+function insideAny(rects, x, y) {
+  for (var i = 0; i < rects.length; i++) {
+    var r = rects[i];
+    if (x >= r.x1 && x <= r.x2 && y >= r.y1 && y <= r.y2) return true;
+  }
+  return false;
+}
+
+// Liang–Barsky: the fraction [0,1] along (x0,y0)→(x1,y1) where it first is
+// inside the rectangle, or -1 when it never is.
+function segmentEntry(x0, y0, x1, y1, r) {
+  var dx = x1 - x0, dy = y1 - y0;
+  var t0 = 0, t1 = 1;
+  var p = [-dx, dx, -dy, dy];
+  var q = [x0 - r.x1, r.x2 - x0, y0 - r.y1, r.y2 - y0];
+  for (var i = 0; i < 4; i++) {
+    if (p[i] === 0) {
+      if (q[i] < 0) return -1;
+    } else {
+      var t = q[i] / p[i];
+      if (p[i] < 0) { if (t > t1) return -1; if (t > t0) t0 = t; }
+      else { if (t < t0) return -1; if (t < t1) t1 = t; }
+    }
+  }
+  return t0;
+}
+
+// The program as XY polylines per line, in work coordinates (or machine
+// coordinates for G53 lines, flagged mc). Lines without XY motion, or whose
+// start isn't known (after G28/G30/G53/G92), are null.
+function parseProgramPaths(text) {
+  var lines = String(text || '').split('\n');
+  var out = new Array(lines.length);
+  var abs = true, inch = false, motion = null;
+  var x = NaN, y = NaN;
+  var wordRe = /([A-Z])\s*([-+]?(?:\d+\.?\d*|\.\d+))/g;
+  for (var i = 0; i < lines.length; i++) {
+    out[i] = null;
+    var raw = lines[i].toUpperCase().replace(/\([^)]*\)/g, '').replace(/;.*$/, '');
+    if (!raw.trim()) continue;
+    var w = {}, gs = [], m;
+    wordRe.lastIndex = 0;
+    while ((m = wordRe.exec(raw)) !== null) {
+      var v = parseFloat(m[2]);
+      if (m[1] === 'G') gs.push(Math.round(v * 10) / 10); else if (!(m[1] in w)) w[m[1]] = v;
+    }
+    var lineMotion = null, g53 = false, lost = false;
+    for (var g = 0; g < gs.length; g++) {
+      var c = gs[g];
+      if (c === 90) abs = true; else if (c === 91) abs = false;
+      else if (c === 20) inch = true; else if (c === 21) inch = false;
+      else if (c >= 0 && c <= 3 && c === Math.floor(c)) { motion = c; lineMotion = c; }
+      else if (c === 53) g53 = true;
+      else if (c === 28 || c === 30 || c === 92 || c === 28.1 || c === 30.1) lost = true;
+    }
+    var hasX = 'X' in w, hasY = 'Y' in w;
+    if (lost) { x = NaN; y = NaN; continue; }
+    var mot = lineMotion !== null ? lineMotion : motion;
+    if (mot === null || (!hasX && !hasY && !('I' in w) && !('J' in w))) continue;
+    var k = inch ? 25.4 : 1;
+    if (g53) {
+      // Machine coordinates, this line only; work position unknown after.
+      var mx = hasX ? w.X * k : NaN, my = hasY ? w.Y * k : NaN;
+      if (isFinite(mx) && isFinite(my)) out[i] = { pts: [mx, my], mc: true, rapid: mot === 0 };
+      x = NaN; y = NaN;
+      continue;
+    }
+    var nx = hasX ? (abs ? w.X * k : x + w.X * k) : x;
+    var ny = hasY ? (abs ? w.Y * k : y + w.Y * k) : y;
+    if (isFinite(x) && isFinite(y) && isFinite(nx) && isFinite(ny)) {
+      var pts = [x, y];
+      if ((mot === 2 || mot === 3) && ('I' in w || 'J' in w || 'R' in w)) {
+        arcPoints(pts, x, y, nx, ny, w, k, mot === 2);
+      }
+      pts.push(nx, ny);
+      out[i] = { pts: pts, mc: false, rapid: mot === 0 };
+    }
+    x = nx; y = ny;
+  }
+  return out;
+}
+
+// Intermediate points of an XY arc, every ≤ 10°, between start and end.
+function arcPoints(pts, x0, y0, x1, y1, w, k, cw) {
+  var cx, cy;
+  if ('I' in w || 'J' in w) {
+    cx = x0 + (w.I || 0) * k; cy = y0 + (w.J || 0) * k;
+  } else {
+    var r = w.R * k, mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    var dx = x1 - x0, dy = y1 - y0, d = Math.sqrt(dx * dx + dy * dy);
+    if (!(d > 0) || Math.abs(r) < d / 2) return;
+    var h = Math.sqrt(r * r - d * d / 4) * ((cw ? 1 : -1) * (r > 0 ? 1 : -1));
+    cx = mx - h * dy / d; cy = my + h * dx / d;
+  }
+  var a0 = Math.atan2(y0 - cy, x0 - cx), a1 = Math.atan2(y1 - cy, x1 - cx);
+  var rad = Math.sqrt((x0 - cx) * (x0 - cx) + (y0 - cy) * (y0 - cy));
+  var sweep = a1 - a0;
+  if (cw) { if (sweep >= 0) sweep -= 2 * Math.PI; } else { if (sweep <= 0) sweep += 2 * Math.PI; }
+  var n = Math.min(72, Math.ceil(Math.abs(sweep) / (Math.PI / 18)));
+  for (var s = 1; s < n; s++) {
+    var a = a0 + sweep * s / n;
+    pts.push(cx + rad * Math.cos(a), cy + rad * Math.sin(a));
+  }
+}
+
+function polyLength(p) {
+  var len = 0;
+  for (var i = 2; i < p.length; i += 2) len += Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]);
+  return len;
+}
+
+// Seconds until the spindle first enters a rect, walking the program from
+// the executing line; Infinity when it doesn't within the horizon.
+//   paths/lineSec: parseProgramPaths + host estimates (index = line - 1)
+//   line: executing line (1-based); pos: machine XY now; wco: work offset
+//   rates: { feed, rapid } overrides as fractions (1 = 100 %)
+function secondsToZone(paths, lineSec, line, pos, wco, rects, rates) {
+  if (!rects.length) return Infinity;
+  if (insideAny(rects, pos.x, pos.y)) return 0;
+  var t = 0;
+  var start = Math.max(0, line - 1);
+  for (var i = start; i < paths.length && i < start + ZONE_MAX_LINES_AHEAD; i++) {
+    var p = paths[i];
+    var sec = (lineSec && lineSec[i]) || 0;
+    if (!p) { t += sec / Math.max(0.1, rates.feed); if (t > ZONE_HORIZON_SEC) break; continue; }
+    var ox = p.mc ? 0 : wco.x, oy = p.mc ? 0 : wco.y;
+    var pts = [];
+    for (var j = 0; j < p.pts.length; j += 2) pts.push(p.pts[j] + ox, p.pts[j + 1] + oy);
+    var scale = sec * ZONE_TIME_SAFETY / Math.max(0.1, p.rapid ? rates.rapid : rates.feed);
+    var total = polyLength(pts);
+    if (i === start) {
+      // Only what's left of the line being cut: from the spindle on.
+      var cut = remainingFrom(pts, pos.x, pos.y);
+      scale = total > 0 ? scale * polyLength(cut) / total : 0;
+      total = polyLength(cut);
+      pts = cut;
+    }
+    if (pts.length < 4) { t += scale; continue; }
+    var acc = 0;
+    for (var s = 2; s < pts.length; s += 2) {
+      var x0 = pts[s - 2], y0 = pts[s - 1], x1 = pts[s], y1 = pts[s + 1];
+      var segLen = Math.hypot(x1 - x0, y1 - y0);
+      for (var r = 0; r < rects.length; r++) {
+        var e = segmentEntry(x0, y0, x1, y1, rects[r]);
+        if (e >= 0) return t + (total > 0 ? scale * (acc + e * segLen) / total : 0);
+      }
+      acc += segLen;
+    }
+    t += scale;
+    if (t > ZONE_HORIZON_SEC) break;
+  }
+  return Infinity;
+}
+
+// The polyline from the point nearest (x, y) to its end.
+function remainingFrom(pts, x, y) {
+  var best = 0, bestD = Infinity, bestT = 0;
+  for (var s = 2; s < pts.length; s += 2) {
+    var x0 = pts[s - 2], y0 = pts[s - 1], dx = pts[s] - x0, dy = pts[s + 1] - y0;
+    var l2 = dx * dx + dy * dy;
+    var u = l2 > 0 ? Math.min(1, Math.max(0, ((x - x0) * dx + (y - y0) * dy) / l2)) : 0;
+    var px = x0 + u * dx, py = y0 + u * dy;
+    var d = (px - x) * (px - x) + (py - y) * (py - y);
+    if (d < bestD) { bestD = d; best = s; bestT = u; }
+  }
+  if (best === 0) return pts.slice();
+  var out = [pts[best - 2] + bestT * (pts[best] - pts[best - 2]), pts[best - 1] + bestT * (pts[best + 1] - pts[best - 1])];
+  return out.concat(pts.slice(best));
+}
+
+// What the boot should do now: 'up', 'down' or null (leave it).
+//   state: 'up' | 'down'; entrySec: secondsToZone; inZone: spindle inside
+function decideZone(state, entrySec, inZone, settings, upSinceSec) {
+  var liftSec = bootMoveSec(settings.safeLiftMm) + settings.liftEarlySec + ZONE_LATENCY_SEC;
+  if (state !== 'up') return (inZone || entrySec <= liftSec) ? 'up' : null;
+  if (inZone) return null;
+  // Don't bounce: give a lift a moment before dropping again, and stay up
+  // when the next entry comes back before a drop and lift would be done.
+  if (upSinceSec < 0.3) return null;
+  var keepUp = liftSec + bootMoveSec(settings.safeLiftMm) + (settings.stayUpBetween ? 2 : 0);
+  return entrySec > keepUp ? 'down' : null;
+}
+
+// --- Runtime (host timer) ---
+var zone = {
+  state: 'idle',        // idle | down | up
+  stamp: null,          // program the paths belong to
+  paths: null,
+  lineSec: null,
+  unitsInch: false,
+  upAt: 0,              // ms the last lift is expected to be done
+  changedAt: 0,
+  held: false,
+  heldAt: 0,
+  pending: null         // 'up' when an expand was sent as a safe-height lift
+};
+
+function zoneReset() {
+  if (zone.held) resumeFromZoneHold();
+  zone.state = 'idle';
+  zone.pending = null;
+}
+
+function zonesActive(settings) {
+  return !!settings && settings.mode === 'wireless' && settings.zonesEnabled === true
+    && activeRects(settings).length > 0;
+}
+
+function hostHas(fn) {
+  return typeof pluginContext !== 'undefined' && !!pluginContext && typeof pluginContext[fn] === 'function';
+}
+
+function readBootStatus() {
+  try {
+    var devices = pluginContext.dongle.getDevices();
+    for (var i = 0; i < devices.length; i++) {
+      var d = devices[i];
+      if (d && d.name === ADB_DEVICE_NAME && typeof d.lastMessage === 'string') {
+        var pm = d.lastMessage.match(/(?:^|\s)pos=(-?\d+)(?:\s|$)/);
+        var em = d.lastMessage.match(/(?:^|\s)expand=(-?\d+)(?:\s|$)/);
+        return {
+          pos: pm ? parseInt(pm[1], 10) : null,
+          expand: em ? parseInt(em[1], 10) : null,
+          connected: d.connected !== false
+        };
+      }
+    }
+  } catch (_) { /* fall through */ }
+  return null;
+}
+
+function safePosition(settings, expand) {
+  if (settings.safePosMm !== null && settings.safePosMm !== undefined && isFinite(settings.safePosMm)) {
+    return Math.max(0, Math.min(expand, Math.round(settings.safePosMm * ADB_COUNTS_PER_MM)));
+  }
+  return Math.max(0, Math.round(expand - settings.safeLiftMm * ADB_COUNTS_PER_MM));
+}
+
+// The settings with safeLiftMm as the real lift for this boot, for timing.
+function withLift(settings, expand) {
+  var out = {};
+  for (var k in settings) out[k] = settings[k];
+  out.safeLiftMm = Math.max(0, (expand - safePosition(settings, expand)) / ADB_COUNTS_PER_MM);
+  return out;
+}
+
+// Load the paths for the program the job runs. Done at job start, where the
+// stream waits on the start retract anyway, and again if the program changes.
+function prepareZones(settings) {
+  if (!zonesActive(settings) || !hostHas('getProgram')) return false;
+  try {
+    var program = pluginContext.getProgram();
+    if (!program) { zone.paths = null; return false; }
+    if (zone.stamp !== program.stamp || !zone.paths) {
+      zone.paths = parseProgramPaths(program.text);
+      zone.lineSec = program.lineSec;
+      zone.stamp = program.stamp;
+    }
+    var s13 = hostHas('getFirmwareSetting') ? pluginContext.getFirmwareSetting('13') : null;
+    // $13 bit 0: positions reported in inches.
+    zone.unitsInch = typeof s13 === 'number' && (s13 & 1) === 1;
+    return true;
+  } catch (e) {
+    zone.paths = null;
+    return false;
+  }
+}
+
+function machineXY(st) {
+  var k = zone.unitsInch ? 25.4 : 1;
+  return {
+    pos: { x: st.mpos.x * k, y: st.mpos.y * k },
+    wco: { x: st.wco.x * k, y: st.wco.y * k }
+  };
+}
+
+function holdForZone() {
+  if (zone.held || !hostHas('sendCommand')) return;
+  pluginContext.sendCommand('!', '! (AutoDustBoot: waiting for the boot to reach safe height)');
+  zone.held = true;
+  zone.heldAt = Date.now();
+}
+
+function resumeFromZoneHold() {
+  if (!zone.held) return;
+  zone.held = false;
+  if (hostHas('sendCommand')) pluginContext.sendCommand('~', '~ (AutoDustBoot: boot at safe height)');
+}
+
+function zoneTick() {
+  var settings = zoneSettings;
+  if (!zonesActive(settings) || !hostHas('getServerState')) { if (zone.state !== 'idle') zoneReset(); return; }
+  var st = pluginContext.getServerState();
+  // A feed hold (ours or the operator's) shows as a paused job.
+  var job = st ? st.jobStatus : null;
+  if ((job !== 'running' && job !== 'paused') || awaitingExpand || laserModeActive || !st.mpos) {
+    if (zone.state !== 'idle') zoneReset();
+    return;
+  }
+  // Paused by the operator: leave everything as it is until they resume.
+  if (job === 'paused' && !zone.held) return;
+
+  var boot = readBootStatus();
+  if (!boot || !boot.connected || boot.expand === null || boot.expand <= 0) return;
+  var safe = safePosition(settings, boot.expand);
+  settings = withLift(settings, boot.expand);
+  var tol = ADB_WAIT_TOLERANCE_STEPS;
+  var now = Date.now();
+
+  if (zone.state === 'idle') {
+    // Take over once the stream's expand (or its safe-height version) is done.
+    if (boot.pos === null) return;
+    if (Math.abs(boot.pos - boot.expand) <= tol) zone.state = 'down';
+    else if (Math.abs(boot.pos - safe) <= tol) { zone.state = 'up'; zone.upAt = now; zone.changedAt = now; }
+    else return;
+    if (!zone.paths) prepareZones(settings);
+  }
+  if (!zone.paths) return;
+
+  var rects = activeRects(settings);
+  var m = machineXY(st);
+  var inZone = insideAny(rects, m.pos.x, m.pos.y);
+  var rates = { feed: (st.feedOverride || 100) / 100, rapid: (st.rapidOverride || 100) / 100 };
+  var entry = secondsToZone(zone.paths, zone.lineSec, st.line || 0, m.pos, m.wco, rects, rates);
+
+  var action = decideZone(zone.state, entry, inZone, settings, (now - zone.changedAt) / 1000);
+  if (action === 'up') {
+    wirelessSend('goto:' + safe);
+    zone.state = 'up';
+    zone.changedAt = now;
+    var fromMm = boot.pos === null ? settings.safeLiftMm : Math.abs(boot.pos - safe) / ADB_COUNTS_PER_MM;
+    zone.upAt = now + bootMoveSec(fromMm) * 1000;
+  } else if (action === 'down') {
+    wirelessSend('goto:' + boot.expand);
+    zone.state = 'down';
+    zone.changedAt = now;
+  }
+
+  // Safety net: about to enter and the boot can't be up yet.
+  if (zone.state === 'up') {
+    var reachedSafe = boot.pos !== null && boot.pos <= safe + tol;
+    var done = reachedSafe || now >= zone.upAt;
+    if (!done && settings.pauseIfLate && (inZone || entry < 0.2) && st.machineStatus === 'Run') holdForZone();
+    if (zone.held && (reachedSafe || now >= zone.upAt + 300)) resumeFromZoneHold();
+  }
+}
+
+// Expand target for a G0 XY that lands in a zone: safe height instead.
+function expandTargetFor(gtext, settings, expand) {
+  if (!zonesActive(settings) || !hostHas('getServerState')) return expand;
+  try {
+    var w = {}, m, re = /([XY])\s*([-+]?(?:\d+\.?\d*|\.\d+))/gi;
+    var up = gtext.toUpperCase();
+    if (/G0*91(?![0-9])|G0*53(?![0-9])/.test(up)) return expand;
+    while ((m = re.exec(up)) !== null) w[m[1]] = parseFloat(m[2]);
+    var st = pluginContext.getServerState();
+    if (!st || !st.wco) return expand;
+    var mm = machineXY(st);
+    var k = /G0*20(?![0-9])/.test(up) ? 25.4 : 1;
+    var x = 'X' in w ? w.X * k + mm.wco.x : mm.pos.x;
+    var y = 'Y' in w ? w.Y * k + mm.wco.y : mm.pos.y;
+    if (insideAny(activeRects(settings), x, y)) return safePosition(settings, expand);
+  } catch (_) { /* expand as usual */ }
+  return expand;
+}
+
+if (typeof pluginContext !== 'undefined' && pluginContext && typeof pluginContext.setInterval === 'function') {
+  pluginContext.setInterval(function() {
+    try { zoneTick(); } catch (_) { /* never break the host timer */ }
+  }, ZONE_TICK_MS);
 }
 
 // === Command Processing ===
@@ -562,11 +1018,12 @@ function onBeforeCommand(commands, context, settings) {
     var s = syncedSequence(retractCommand);
     return [s[0], s[1]];
   }
-  function emitExpand() {
+  function emitExpand(gtext) {
     if (settings.mode === 'wireless') {
       var savedPos = readSavedExpandPosition();
       if (savedPos === null) return [];   // no saved target — skip rather than guess
-      return emitWirelessDongleSequence(savedPos);
+      // Landing in a safe zone: go to the safe height, not all the way down.
+      return emitWirelessDongleSequence(gtext ? expandTargetFor(gtext, settings, savedPos) : savedPos);
     }
     if (!expandCommand) return [];
     var s = syncedSequence(expandCommand);
@@ -668,12 +1125,18 @@ function onBeforeCommand(commands, context, settings) {
     }
     jobRunningNow = inferJob;
   }
+  var retractedHere = false;
+  if (jobRunningNow && !wasJobRunning) {
+    zoneReset();
+    prepareZones(settings);
+  }
   if (jobRunningNow && !wasJobRunning && !awaitingExpand) {
     var jobStartRetract = emitRetract();
     if (jobStartRetract.length > 0) {
       commands.splice.apply(commands, [0, 0].concat(jobStartRetract));
       awaitingExpand = true;
       disarmFollow();
+      retractedHere = true;
     }
   }
   wasJobRunning = jobRunningNow;
@@ -700,7 +1163,12 @@ function onBeforeCommand(commands, context, settings) {
     return /^\$tls/i.test(cmd.command.trim());
   });
   var toolChangeIndex = m6Index !== -1 ? m6Index : tlsIndex;
-  if (toolChangeIndex !== -1 && !awaitingExpand) {
+  // Every tool change retracts, whatever the arm says: the arm can be stale
+  // (a job aborted without a job-end, the boot expanded by hand from the
+  // Outputs button), and a boot left down at the first M6 hits the rack.
+  // A retract is harmless when the boot is already up (wireless: the wait
+  // returns at once). Only skipped when this same batch just retracted.
+  if (toolChangeIndex !== -1 && !retractedHere) {
     var m6Retract = emitRetract();
     if (m6Retract.length > 0) {
       commands.splice.apply(commands, [toolChangeIndex, 0].concat(m6Retract));
@@ -721,7 +1189,7 @@ function onBeforeCommand(commands, context, settings) {
       var gtext = stripNPrefix(gcmd.command.trim());
       if (startsWithMarker(gtext, RETRACT_MARKER) || startsWithMarker(gtext, EXPAND_MARKER)) continue;
       if (!isG0XYLine(gtext)) continue;
-      var xyExpand = emitExpand();
+      var xyExpand = emitExpand(gtext);
       if (xyExpand.length > 0) {
         commands.splice.apply(commands, [gi + 1, 0].concat(xyExpand));
         awaitingExpand = false;
@@ -801,6 +1269,7 @@ function onAfterJobEnd(settings) {
     // a way to inject a command outside a job without a new host hook.
   } catch (_) { /* swallow — never block job-end teardown */ }
 
+  zoneReset();
   isToolChanging = false;
   awaitingExpand = false;
   wasJobRunning = false;
@@ -819,4 +1288,5 @@ function onGcodeProgramLoad(content, _context, _settings) {
   return content;
 }
 
-export { onBeforeCommand, buildInitialConfig, onAfterJobEnd, injectDustBootMarkers, onGcodeProgramLoad };
+export { onBeforeCommand, buildInitialConfig, onAfterJobEnd, injectDustBootMarkers, onGcodeProgramLoad,
+  parseProgramPaths, segmentEntry, secondsToZone, decideZone, activeRects, insideAny, sanitizeZones, zoneTick, zone };

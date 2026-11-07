@@ -164,15 +164,33 @@ describe('laser mode (context.laserMode === true)', () => {
 });
 
 describe('M6 detection (any context)', () => {
-  test('preamble M6 injects retract BEFORE it and arms expand', () => {
-    // Job-start transition already fired retract, so a preamble M6 in the
-    // SAME session should not double-retract — arm is still true.
+  test('first M6 retracts even right after the job-start retract', () => {
+    // A retract is harmless when the boot is already up, and the arm can't be
+    // trusted to say where the boot really is: always retract before M6.
     onBeforeCommand(wrap('G21'), ctx({ jobRunning: true, sourceId: 'resume' }), WIRED);
     const m6 = wrap('M6 T2');
     onBeforeCommand(m6, ctx({ jobRunning: true, sourceId: 'resume' }), WIRED);
-    // Only ONE retract in total should be visible across the two batches —
-    // the first at job start; the second (M6) should NOT re-inject.
-    assert.equal(m6.length, 1, `M6 should not double-retract, got ${JSON.stringify(m6.map(c => c.command))}`);
+    assert.equal(m6[m6.length - 1].command, 'M6 T2');
+    assert.ok(m6.length > 1, `M6 must retract, got ${JSON.stringify(m6.map(c => c.command))}`);
+  });
+
+  test('M6 retracts when a previous job was aborted without a job end', () => {
+    // Job start arms the expand; the job is then aborted with no
+    // onAfterJobEnd, so the arm is stale when the next job begins.
+    onBeforeCommand(wrap('G21'), ctx({ jobRunning: true, sourceId: 'job' }), WIRELESS);
+    onBeforeCommand(wrap('$H'), ctx({ jobRunning: false, sourceId: 'client' }), WIRELESS);
+    onBeforeCommand(wrap('(DONGLE:autodustboot:goto:expand)'), ctx({ jobRunning: false, sourceId: 'client' }), WIRELESS);
+    onBeforeCommand(wrap('N1 (job)'), ctx({ jobRunning: true, sourceId: 'job' }), WIRELESS);
+    const m6 = wrap('N18 T1 M6');
+    onBeforeCommand(m6, ctx({ jobRunning: true, sourceId: 'job' }), WIRELESS);
+    assert.ok(m6.some(c => c.command === '(DONGLE:autodustboot:goto:0)'),
+      `first M6 must retract, got ${JSON.stringify(m6.map(c => c.command))}`);
+  });
+
+  test('job start and M6 in the same batch retract once', () => {
+    const batch = wrap('M6 T2');
+    onBeforeCommand(batch, ctx({ jobRunning: true, sourceId: 'resume' }), WIRELESS);
+    assert.equal(batch.filter(c => c.command === '(DONGLE:autodustboot:goto:0)').length, 1);
   });
 
   test('mid-job M6 (after expand consumed) fires retract again', () => {
