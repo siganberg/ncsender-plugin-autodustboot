@@ -1,7 +1,5 @@
+Warning: this sign-in ends between 2026-11-25 and 2026-11-28 (in 6 days at the earliest). Renewing it does not move those dates. Run claude auth login before then, or use claude setup-token for unattended jobs.
 ## What's Changed
 
-### ✨ New Features
-- Safe Zones (beta): mark areas where clamps, fixtures or rails sit, and the dust boot rises to a safe height as it passes over them, then lowers again, so the job keeps running without stopping
-
 ### 🐛 Bug Fixes
-- The dust boot now always retracts before a tool change, including after a job was aborted
+- Safe zones no longer cause long jobs to fail by running into the plugin memory limit
