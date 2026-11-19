@@ -398,6 +398,7 @@ const BOOT_MM_PER_SEC = 60;      // conservative; the boot moves ~80 mm/s
 const BOOT_START_SEC = 0.15;
 const ZONE_HORIZON_SEC = 12;
 const ZONE_MAX_LINES_AHEAD = 4000;
+const ZONE_PARSE_LINES_PER_TICK = 4000; // ~6 MB of the host's 50 MB per-call budget
 
 function clampNum(v, lo, hi, dflt) {
   var n = Number(v);
@@ -468,47 +469,96 @@ function segmentEntry(x0, y0, x1, y1, r) {
 // coordinates for G53 lines, flagged mc). Lines without XY motion, or whose
 // start isn't known (after G28/G30/G53/G92), are null.
 function parseProgramPaths(text) {
-  var lines = String(text || '').split('\n');
-  var out = new Array(lines.length);
-  var abs = true, inch = false, motion = null;
-  var x = NaN, y = NaN;
-  var wordRe = /([A-Z])\s*([-+]?(?:\d+\.?\d*|\.\d+))/g;
-  for (var i = 0; i < lines.length; i++) {
-    out[i] = null;
-    var raw = lines[i].toUpperCase().replace(/\([^)]*\)/g, '').replace(/;.*$/, '');
-    if (!raw.trim()) continue;
-    var w = {}, gs = [], m;
-    wordRe.lastIndex = 0;
-    while ((m = wordRe.exec(raw)) !== null) {
-      var v = parseFloat(m[2]);
-      if (m[1] === 'G') gs.push(Math.round(v * 10) / 10); else if (!(m[1] in w)) w[m[1]] = v;
+  var parser = newPathParser(text);
+  parsePathsMore(parser, Infinity);
+  return parser.out;
+}
+
+// The same, a slice at a time. The host counts every allocation a plugin
+// call makes against a 50 MB budget (and fails the job past it), so a long
+// program is read over several timer ticks instead of in one call; the
+// regex/split version spent the whole budget on a ~10k-line file.
+function newPathParser(text) {
+  return { src: String(text || ''), pos: 0, done: false, out: [],
+    abs: true, inch: false, motion: null, x: NaN, y: NaN };
+}
+
+// Reads up to maxLines more lines into parser.out; true once at the end.
+function parsePathsMore(parser, maxLines) {
+  if (parser.done) return true;
+  var src = parser.src, len = src.length, out = parser.out;
+  var abs = parser.abs, inch = parser.inch, motion = parser.motion;
+  var x = parser.x, y = parser.y;
+  var pos = parser.pos;
+  for (var count = 0; count < maxLines; count++) {
+    if (pos > len) { parser.done = true; break; }
+    var i = out.length;
+    out.push(null);
+    var end = src.indexOf('\n', pos);
+    if (end === -1) end = len;
+    var wx = NaN, wy = NaN, wi = NaN, wj = NaN, wr = NaN;
+    var lineMotion = null, g53 = false, lost = false, any = false;
+    var p = pos;
+    while (p < end) {
+      var c = src.charCodeAt(p);
+      if (c === 59) break;                                  // ';' comment
+      if (c === 40) { var cl = src.indexOf(')', p); p = (cl === -1 || cl > end) ? end : cl + 1; continue; }
+      if (c >= 97 && c <= 122) c -= 32;
+      if (c < 65 || c > 90) { p++; continue; }
+      // letter, optional spaces, then a number
+      var n = p + 1;
+      while (n < end && src.charCodeAt(n) === 32) n++;
+      var s0 = n;
+      var ch = src.charCodeAt(n);
+      if (ch === 43 || ch === 45) n++;
+      var digits = 0, dot = false;
+      while (n < end) {
+        ch = src.charCodeAt(n);
+        if (ch >= 48 && ch <= 57) { digits++; n++; }
+        else if (ch === 46 && !dot) { dot = true; n++; }
+        else break;
+      }
+      if (digits === 0) { p++; continue; }
+      var v = parseFloat(src.substring(s0, n));
+      p = n;
+      any = true;
+      if (c === 71) {                                       // G
+        var gc = Math.round(v * 10) / 10;
+        if (gc === 90) abs = true; else if (gc === 91) abs = false;
+        else if (gc === 20) inch = true; else if (gc === 21) inch = false;
+        else if (gc >= 0 && gc <= 3 && gc === Math.floor(gc)) { motion = gc; lineMotion = gc; }
+        else if (gc === 53) g53 = true;
+        else if (gc === 28 || gc === 30 || gc === 92 || gc === 28.1 || gc === 30.1) lost = true;
+      }
+      else if (c === 88) { if (wx !== wx) wx = v; }         // X (first one wins)
+      else if (c === 89) { if (wy !== wy) wy = v; }
+      else if (c === 73) { if (wi !== wi) wi = v; }
+      else if (c === 74) { if (wj !== wj) wj = v; }
+      else if (c === 82) { if (wr !== wr) wr = v; }
     }
-    var lineMotion = null, g53 = false, lost = false;
-    for (var g = 0; g < gs.length; g++) {
-      var c = gs[g];
-      if (c === 90) abs = true; else if (c === 91) abs = false;
-      else if (c === 20) inch = true; else if (c === 21) inch = false;
-      else if (c >= 0 && c <= 3 && c === Math.floor(c)) { motion = c; lineMotion = c; }
-      else if (c === 53) g53 = true;
-      else if (c === 28 || c === 30 || c === 92 || c === 28.1 || c === 30.1) lost = true;
-    }
-    var hasX = 'X' in w, hasY = 'Y' in w;
+    pos = end + 1;
+    if (!any) continue;
+    var hasX = wx === wx, hasY = wy === wy, hasI = wi === wi, hasJ = wj === wj, hasR = wr === wr;
     if (lost) { x = NaN; y = NaN; continue; }
     var mot = lineMotion !== null ? lineMotion : motion;
-    if (mot === null || (!hasX && !hasY && !('I' in w) && !('J' in w))) continue;
+    if (mot === null || (!hasX && !hasY && !hasI && !hasJ)) continue;
     var k = inch ? 25.4 : 1;
     if (g53) {
       // Machine coordinates, this line only; work position unknown after.
-      var mx = hasX ? w.X * k : NaN, my = hasY ? w.Y * k : NaN;
+      var mx = hasX ? wx * k : NaN, my = hasY ? wy * k : NaN;
       if (isFinite(mx) && isFinite(my)) out[i] = { pts: [mx, my], mc: true, rapid: mot === 0 };
       x = NaN; y = NaN;
       continue;
     }
-    var nx = hasX ? (abs ? w.X * k : x + w.X * k) : x;
-    var ny = hasY ? (abs ? w.Y * k : y + w.Y * k) : y;
+    var nx = hasX ? (abs ? wx * k : x + wx * k) : x;
+    var ny = hasY ? (abs ? wy * k : y + wy * k) : y;
     if (isFinite(x) && isFinite(y) && isFinite(nx) && isFinite(ny)) {
       var pts = [x, y];
-      if ((mot === 2 || mot === 3) && ('I' in w || 'J' in w || 'R' in w)) {
+      if ((mot === 2 || mot === 3) && (hasI || hasJ || hasR)) {
+        var w = {};
+        if (hasI) w.I = wi;
+        if (hasJ) w.J = wj;
+        if (hasR) w.R = wr;
         arcPoints(pts, x, y, nx, ny, w, k, mot === 2);
       }
       pts.push(nx, ny);
@@ -516,7 +566,11 @@ function parseProgramPaths(text) {
     }
     x = nx; y = ny;
   }
-  return out;
+  if (pos > len) parser.done = true;
+  parser.pos = pos;
+  parser.abs = abs; parser.inch = inch; parser.motion = motion;
+  parser.x = x; parser.y = y;
+  return parser.done;
 }
 
 // Intermediate points of an XY arc, every ≤ 10°, between start and end.
@@ -625,6 +679,7 @@ var zone = {
   state: 'idle',        // idle | down | up
   stamp: null,          // program the paths belong to
   paths: null,
+  parser: null,         // reads paths a slice per tick
   lineSec: null,
   unitsInch: false,
   upAt: 0,              // ms the last lift is expected to be done
@@ -689,9 +744,11 @@ function prepareZones(settings) {
   if (!zonesActive(settings) || !hostHas('getProgram')) return false;
   try {
     var program = pluginContext.getProgram();
-    if (!program) { zone.paths = null; return false; }
+    if (!program) { zone.paths = null; zone.parser = null; return false; }
     if (zone.stamp !== program.stamp || !zone.paths) {
-      zone.paths = parseProgramPaths(program.text);
+      // Read on the next ticks (zoneTick), a slice per call.
+      zone.parser = newPathParser(program.text);
+      zone.paths = zone.parser.out;
       zone.lineSec = program.lineSec;
       zone.stamp = program.stamp;
     }
@@ -755,6 +812,8 @@ function zoneTick() {
     if (!zone.paths) prepareZones(settings);
   }
   if (!zone.paths) return;
+  // Keep reading the program a slice per tick until it's all in.
+  if (zone.parser && !zone.parser.done) parsePathsMore(zone.parser, ZONE_PARSE_LINES_PER_TICK);
 
   var rects = activeRects(settings);
   var m = machineXY(st);
